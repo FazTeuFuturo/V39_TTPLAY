@@ -1,0 +1,484 @@
+// Schema Prisma - Plataforma de Tênis de Mesa
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// MODELOS DE USUÁRIO E AUTENTICAÇÃO
+// ============================================
+
+model User {
+  id               String                 @id @default(cuid())
+  email            String                 @unique
+  name             String
+  username         String?                @unique
+  password         String?                // Nullable para login social
+  avatar           String?
+  bio              String?
+  birthDate        DateTime?
+  phone            String?
+  city             String?
+  state            String?
+  country          String                 @default("BR")
+  
+  // Dados específicos do tênis de mesa
+  playingLevel     PlayingLevel           @default(BEGINNER)
+  dominantHand     DominantHand           @default(RIGHT)
+  playingStyle     PlayingStyle?
+  yearsPlaying     Int?
+  
+  // Sistema de ranking
+  currentRating    Int                    @default(1200) // ELO rating
+  peakRating       Int                    @default(1200)
+  gamesPlayed      Int                    @default(0)
+  wins             Int                    @default(0)
+  losses           Int                    @default(0)
+  
+  // Configurações e status
+  role             Role                   @default(PLAYER)
+  isEmailVerified  Boolean                @default(false)
+  isActive         Boolean                @default(true)
+  lastActiveAt     DateTime?
+  
+  // Timestamps
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+
+  // Relacionamentos
+  club             Club?
+  
+  // Partidas como jogador
+  matchesAsPlayer1 Match[]                @relation("Player1")
+  matchesAsPlayer2 Match[]                @relation("Player2")
+  matchesWon       Match[]                @relation("Winner")
+  
+  // Campeonatos
+  playerOnTournaments PlayerOnTournament[]
+  
+  // Sistema social
+  followers        Follow[]               @relation("Follower")
+  following        Follow[]               @relation("Following")
+  posts            Post[]
+  likes            Like[]
+  comments         Comment[]
+  
+  // Desafios
+  challengesSent   Challenge[]            @relation("Challenger")
+  challengesReceived Challenge[]          @relation("Challenged")
+  
+  // Notificações
+  notifications    Notification[]
+  
+  // Histórico de ratings
+  ratingHistory    RatingHistory[]
+
+  @@map("users")
+}
+
+// Enums relacionados ao usuário
+enum Role {
+  PLAYER
+  CLUB_ADMIN
+  SUPER_ADMIN
+}
+
+enum PlayingLevel {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+  PROFESSIONAL
+}
+
+enum DominantHand {
+  LEFT
+  RIGHT
+  AMBIDEXTROUS
+}
+
+enum PlayingStyle {
+  OFFENSIVE
+  DEFENSIVE
+  ALL_AROUND
+  DEFENSIVE_CHOPPER
+  PIPS_OUT_HITTER
+}
+
+// ============================================
+// SISTEMA DE SEGUIR/SEGUIDORES
+// ============================================
+
+model Follow {
+  id          String   @id @default(cuid())
+  followerId  String
+  followingId String
+  createdAt   DateTime @default(now())
+
+  follower    User     @relation("Follower", fields: [followerId], references: [id], onDelete: Cascade)
+  following   User     @relation("Following", fields: [followingId], references: [id], onDelete: Cascade)
+
+  @@unique([followerId, followingId])
+  @@map("follows")
+}
+
+// ============================================
+// CLUBES E ORGANIZAÇÕES
+// ============================================
+
+model Club {
+  id              String         @id @default(cuid())
+  name            String         @unique
+  description     String?
+  address         String?
+  city            String?
+  state           String?
+  country         String         @default("BR")
+  phone           String?
+  email           String?
+  website         String?
+  logo            String?
+  
+  // Configurações
+  isVerified      Boolean        @default(false)
+  subscriptionPlan SubscriptionPlan @default(FREE)
+  
+  // Relacionamento com admin
+  adminId         String         @unique
+  admin           User           @relation(fields: [adminId], references: [id])
+  
+  // Timestamps
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  
+  // Relacionamentos
+  tournaments     Tournament[]
+
+  @@map("clubs")
+}
+
+enum SubscriptionPlan {
+  FREE
+  BASIC
+  PRO
+  ENTERPRISE
+}
+
+// ============================================
+// CAMPEONATOS E COMPETIÇÕES
+// ============================================
+
+model Tournament {
+  id                String                 @id @default(cuid())
+  name              String
+  description       String?
+  startDate         DateTime
+  endDate           DateTime?
+  registrationDeadline DateTime?
+  location          String
+  address           String?
+  entryFee          Float                  @default(0)
+  maxParticipants   Int?
+  minParticipants   Int                    @default(4)
+  
+  // Configurações técnicas
+  setRule           Int                    @default(3) // Best of 3 ou 5
+  pointsPerSet      Int                    @default(11)
+  format            TournamentFormat       @default(SINGLE_ELIMINATION)
+  status            TournamentStatus       @default(REGISTRATION)
+  
+  // Configurações de ranking
+  isRanked          Boolean                @default(true)
+  kFactor           Int                    @default(32) // Para cálculo ELO
+  
+  // Timestamps
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+
+  // Relacionamentos
+  clubId            String
+  club              Club                   @relation(fields: [clubId], references: [id])
+  players           PlayerOnTournament[]
+  matches           Match[]
+  posts             Post[]                 @relation("TournamentPosts")
+
+  @@map("tournaments")
+}
+
+enum TournamentFormat {
+  SINGLE_ELIMINATION
+  DOUBLE_ELIMINATION
+  ROUND_ROBIN
+  SWISS_SYSTEM
+}
+
+enum TournamentStatus {
+  REGISTRATION
+  REGISTRATION_CLOSED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+// ============================================
+// INSCRIÇÕES EM CAMPEONATOS
+// ============================================
+
+model PlayerOnTournament {
+  id             String                @id @default(cuid())
+  playerId       String
+  tournamentId   String
+  
+  // Status e posicionamento
+  registrationStatus RegistrationStatus @default(PENDING)
+  seed           Int?                  // Posição no seeding
+  finalPosition  Int?                  // Posição final no torneio
+  
+  // Timestamps
+  registeredAt   DateTime              @default(now())
+  confirmedAt    DateTime?
+  
+  // Relacionamentos
+  player         User                  @relation(fields: [playerId], references: [id])
+  tournament     Tournament            @relation(fields: [tournamentId], references: [id])
+
+  @@unique([playerId, tournamentId])
+  @@map("player_tournaments")
+}
+
+enum RegistrationStatus {
+  PENDING
+  CONFIRMED
+  REJECTED
+  CANCELLED
+  WITHDRAWN
+}
+
+// ============================================
+// PARTIDAS E RESULTADOS
+// ============================================
+
+model Match {
+  id             String      @id @default(cuid())
+  tournamentId   String?     // Nullable para desafios individuais
+  player1Id      String
+  player2Id      String
+  winnerId       String?
+  challengeId    String?     // FK para Challenge
+  
+  // Detalhes da partida
+  matchType      MatchType   @default(TOURNAMENT)
+  round          Int?        // Rodada do campeonato
+  status         MatchStatus @default(SCHEDULED)
+  
+  // Placar detalhado
+  player1Score   Int         @default(0) // Sets ganhos
+  player2Score   Int         @default(0) // Sets ganhos
+  setScores      String?     // JSON string de placares de cada set
+  
+  // Ratings no momento da partida (para cálculo ELO)
+  player1RatingBefore Int?
+  player2RatingBefore Int?
+  player1RatingAfter  Int?
+  player2RatingAfter  Int?
+  
+  // Timestamps
+  scheduledFor   DateTime?
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  // Relacionamentos
+  tournament     Tournament? @relation(fields: [tournamentId], references: [id])
+  player1        User        @relation("Player1", fields: [player1Id], references: [id])
+  player2        User        @relation("Player2", fields: [player2Id], references: [id])
+  winner         User?       @relation("Winner", fields: [winnerId], references: [id])
+  challenge      Challenge?  @relation(fields: [challengeId], references: [id])
+
+  @@map("matches")
+}
+
+enum MatchType {
+  TOURNAMENT
+  CHALLENGE
+  FRIENDLY
+  TRAINING
+}
+
+enum MatchStatus {
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  WALKOVER
+}
+
+// ============================================
+// SISTEMA DE DESAFIOS
+// ============================================
+
+model Challenge {
+  id           String         @id @default(cuid())
+  challengerId String
+  challengedId String
+  
+  // Detalhes do desafio
+  message      String?
+  proposedDate DateTime?
+  location     String?
+  status       ChallengeStatus @default(PENDING)
+  
+  // Resposta
+  response     String?
+  respondedAt  DateTime?
+  
+  // Timestamps
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  expiresAt    DateTime       // Auto-expire após X dias
+
+  // Relacionamentos
+  challenger   User           @relation("Challenger", fields: [challengerId], references: [id])
+  challenged   User           @relation("Challenged", fields: [challengedId], references: [id])
+  matches      Match[]        // One-to-many relationship
+
+  @@map("challenges")
+}
+
+enum ChallengeStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  EXPIRED
+  COMPLETED
+}
+
+// ============================================
+// SISTEMA SOCIAL - POSTS E FEED
+// ============================================
+
+model Post {
+  id           String     @id @default(cuid())
+  authorId     String
+  content      String
+  images       String     @default("[]") // JSON string array de URLs das imagens
+  
+  // Tipo de post
+  type         PostType   @default(GENERAL)
+  
+  // Relacionamentos opcionais
+  tournamentId String?
+  matchId      String?    // Para posts sobre partidas específicas
+  
+  // Métricas
+  likesCount   Int        @default(0)
+  commentsCount Int       @default(0)
+  
+  // Timestamps
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  // Relacionamentos
+  author       User       @relation(fields: [authorId], references: [id])
+  tournament   Tournament? @relation("TournamentPosts", fields: [tournamentId], references: [id])
+  likes        Like[]
+  comments     Comment[]
+
+  @@map("posts")
+}
+
+enum PostType {
+  GENERAL
+  TRAINING
+  MATCH_RESULT
+  TOURNAMENT_UPDATE
+  ACHIEVEMENT
+  TIP
+}
+
+model Like {
+  id        String   @id @default(cuid())
+  userId    String
+  postId    String
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, postId])
+  @@map("likes")
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  content   String
+  userId    String
+  postId    String
+  parentId  String?  // Para replies
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  parent    Comment? @relation("CommentReplies", fields: [parentId], references: [id])
+  replies   Comment[] @relation("CommentReplies")
+
+  @@map("comments")
+}
+
+// ============================================
+// SISTEMA DE NOTIFICAÇÕES
+// ============================================
+
+model Notification {
+  id          String            @id @default(cuid())
+  userId      String
+  type        NotificationType
+  title       String
+  message     String
+  data        String?           @default("{}") // JSON string de dados extras
+  
+  isRead      Boolean           @default(false)
+  readAt      DateTime?
+  
+  createdAt   DateTime          @default(now())
+
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
+
+enum NotificationType {
+  MATCH_SCHEDULED
+  MATCH_RESULT
+  CHALLENGE_RECEIVED
+  CHALLENGE_ACCEPTED
+  TOURNAMENT_REGISTRATION
+  FOLLOW
+  LIKE
+  COMMENT
+  RATING_CHANGE
+  ACHIEVEMENT
+}
+
+// ============================================
+// HISTÓRICO DE RATING
+// ============================================
+
+model RatingHistory {
+  id        String   @id @default(cuid())
+  userId    String
+  rating    Int
+  change    Int      // +/- pontos
+  reason    String   // "Match vs Player X", "Tournament Y"
+  matchId   String?  // Referência opcional à partida
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("rating_history")
+}
