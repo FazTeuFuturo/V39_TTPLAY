@@ -2,6 +2,7 @@
 
 'use client'
 
+import { SupabaseTournamentRegistration } from '@/lib/supabase-tournaments'
 import { useState, useEffect, useCallback } from 'react' // ADICIONADO: useCallback
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -32,6 +33,7 @@ interface TournamentListProps {
   userType: 'club' | 'athlete'
   onRegister?: (tournamentId: string) => void
   renderMode?: 'full' | 'simple'
+  userRegistrations?: SupabaseTournamentRegistration[]
 }
 
 // Funções utilitárias de formatação (ajustadas para receber Date object)
@@ -59,7 +61,8 @@ export function TournamentList({
   showCreateButton = true,
   userType,
   onRegister,
-  renderMode = 'full'
+  renderMode = 'full',
+  userRegistrations,
 }: TournamentListProps) {
   const [tournaments, setTournaments] = useState<SupabaseTournament[]>([])
   const [loading, setLoading] = useState(true)
@@ -219,11 +222,11 @@ const renderFullTournamentCard = (tournament: SupabaseTournament) => {
     // O erro "Cannot read properties of null (reading 'registrationDeadline')" pode acontecer se a prop não existir
     const registrationDeadline = tournament.registration_deadline ? new Date(tournament.registration_deadline) : new Date();
     const isClosed = new Date() > registrationDeadline;
-
-    // A contagem de participantes agora precisa ser verificada de outra forma se 'players' não existir
-    // Vamos assumir que por enquanto não temos essa informação na lista
     const isFull = false; // Ajustar se tiver a contagem de inscritos
-
+    const isRegistered = userRegistrations?.some(reg => 
+        reg.tournamentId === tournament.id && 
+        (reg.status === 'registered' || reg.status === 'pending_payment' || reg.status === 'confirmed')
+    );
     return (
         <Card key={tournament.id} className="hover:shadow-lg transition-shadow">
             <CardHeader>
@@ -273,8 +276,14 @@ const renderFullTournamentCard = (tournament: SupabaseTournament) => {
                         </>
                     ) : (
                         // Lógica para atleta, se necessário
-                        <Button className="w-full" size="sm" disabled={isFull || isClosed}>
-                            {isFull ? 'Lotado' : isClosed ? 'Encerrado' : 'Inscrever-se'}
+                        <Button 
+                            className="w-full" 
+                            size="sm" 
+                            variant={isRegistered ? "secondary" : "default"} // Muda a cor do botão se já estiver inscrito
+                            onClick={() => onRegister && onRegister(tournament.id)} 
+                            disabled={isFull || isClosed || isRegistered}
+                        >
+                            {isRegistered ? 'Inscrito' : isFull ? 'Lotado' : isClosed ? 'Inscrições Encerradas' : 'Inscrever-se'}
                         </Button>
                     )}
                 </div>
@@ -312,29 +321,42 @@ const renderSimpleOverview = () => {
     }
 
     // Renderiza a lista simples de itens que se encaixam no Card Pai
-    return (
-        <div className="space-y-4">
-            {tournamentsForOverview.map(tournament => (
+// Renderiza a lista simples de itens que se encaixam no Card Pai
+return (
+    <div className="space-y-4">
+        {tournamentsForOverview.map(tournament => {
+            // Lógica completa para determinar o estado do botão
+            const isRegistered = userRegistrations?.some(reg => 
+                reg.tournamentId === tournament.id && 
+                (reg.status === 'registered' || reg.status === 'pending_payment' || reg.status === 'confirmed')
+            );
+            const isClosed = tournament.registrationDeadline ? new Date() > tournament.registrationDeadline : false;
+            const isFull = tournament.participantCount !== undefined && tournament.participantCount >= tournament.maxParticipants;
+
+            return (
                 // Usamos um layout simplificado (div) para o modo overview
                 <div key={tournament.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                     <div>
                         <p className="font-medium">{tournament.name}</p>
                         <p className="text-xs text-gray-500">Local: {tournament.location}</p>
                         <p className="text-sm text-gray-500">
-                            {tournament.startDate.toLocaleDateString()} - {tournament.endDate?.toLocaleDateString() || 'N/A'}
+                            {tournament.startDate.toLocaleDateString('pt-BR', { timeZone: 'UTC' })}
                         </p>
                     </div>
                     <Button 
                         size="sm"
-                        onClick={() => onRegister ? onRegister(tournament.id) : handleRegisterForTournament(tournament.id)}
-                        disabled={new Date() > tournament.registrationDeadline}
+                        variant={isRegistered ? "secondary" : "default"}
+                        onClick={() => onRegister && onRegister(tournament.id)}
+                        disabled={isFull || isClosed || isRegistered}
                     >
-                        Inscrever-se
+                        {/* Texto do botão agora reage a todas as condições */}
+                        {isRegistered ? 'Inscrito' : isFull ? 'Lotado' : isClosed ? 'Encerrado' : 'Inscrever-se'}
                     </Button>
                 </div>
-            ))}
-        </div>
-    );
+            )
+        })}
+    </div>
+);
 };
 
 

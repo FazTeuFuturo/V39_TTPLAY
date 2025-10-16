@@ -485,11 +485,6 @@ export function ClubDashboard({ user, onUserUpdate, onLogout }: ClubDashboardPro
                   <span className="hidden sm:inline">Meus Torneios</span>
                   <span className="sm:hidden">Torneios</span>
                 </TabsTrigger>
-                <TabsTrigger value="test-data" className="text-xs md:text-sm">
-                  <Database className="h-4 w-4 mr-1 md:mr-2" />
-                  <span className="hidden sm:inline">Gerar Atletas</span>
-                  <span className="sm:hidden">Atletas</span>
-                </TabsTrigger>
                 <TabsTrigger value="profile" className="text-xs md:text-sm">
                   <Users className="h-4 w-4 mr-1 md:mr-2" />
                   Perfil
@@ -779,11 +774,6 @@ export function ClubDashboard({ user, onUserUpdate, onLogout }: ClubDashboardPro
                   )}
                 </div>
               </TabsContent>
-
-              <TabsContent value="test-data" className="mt-0">
-                <TestDataManager />
-              </TabsContent>
-
               <TabsContent value="profile" className="mt-0">
                 <ClubProfile 
                     user={user} 

@@ -1,3 +1,5 @@
+// src/components/tournament/TournamentCreation.tsx
+
 'use client'
 
 import { useState, useEffect } from 'react'
@@ -37,12 +39,23 @@ interface CategoryPrice {
 }
 
 export function TournamentCreation({ onTournamentCreated, createdBy, editTournament }: TournamentCreationProps) {
+ 
+  // Helper para formatar a data para o input sem problemas de fuso horário
+  const formatDateForInput = (date?: Date): string => {
+    if (!date) return '';
+    // Pega o ano, mês e dia em UTC para evitar o deslocamento de fuso
+    const year = date.getUTCFullYear();
+    const month = (date.getUTCMonth() + 1).toString().padStart(2, '0');
+    const day = date.getUTCDate().toString().padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
   const [formData, setFormData] = useState({
     name: editTournament?.name || '',
     description: editTournament?.description || '',
-    startDate: editTournament?.startDate ? new Date(editTournament.startDate).toISOString().split('T')[0] : '',
-    endDate: editTournament?.endDate ? new Date(editTournament.endDate).toISOString().split('T')[0] : '',
-    registrationDeadline: editTournament?.registrationDeadline ? new Date(editTournament.registrationDeadline).toISOString().split('T')[0] : '',
+    startDate: formatDateForInput(editTournament?.startDate),
+    endDate: formatDateForInput(editTournament?.endDate),
+    registrationDeadline: formatDateForInput(editTournament?.registrationDeadline),
     location: editTournament?.location || '',
     maxParticipants: editTournament?.maxParticipants?.toString() || '32',
     format: editTournament?.format || 'groups_elimination',
@@ -59,15 +72,49 @@ export function TournamentCreation({ onTournamentCreated, createdBy, editTournam
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [customCategory, setCustomCategory] = useState({
-  name: '',
-  gender: 'male' as 'male' | 'female' | 'mixed',
-  ageMin: '',
-  ageMax: '',
-  ratingMin: '',
-  ratingMax: ''
-})
+    name: '',
+    gender: 'male' as 'male' | 'female' | 'mixed',
+    ageMin: '',
+    ageMax: '',
+    ratingMin: '',
+    ratingMax: ''
+  })
 
-const handleCreateCustomCategory = async () => {
+  // EFEITO PARA CARREGAR TODAS AS CATEGORIAS DISPONÍVEIS
+  useEffect(() => {
+    loadCategories();
+  }, []);
+
+  // NOVO EFEITO: PARA POPULAR AS CATEGORIAS QUANDO ESTIVER EDITANDO
+  useEffect(() => {
+    if (editTournament && editTournament.categories) {
+      // O 'editTournament.categories' agora tem o formato { categoryId: string, price: number }
+      // que bate perfeitamente com o nosso estado 'selectedCategories'
+      setSelectedCategories(editTournament.categories);
+    }
+  }, [editTournament]);
+
+
+  const loadCategories = async () => {
+    try {
+        setIsLoadingCategories(true);
+        const { data, error } = await supabase
+            .from('app_5732e5c77b_categories')
+            .select('*')
+            .or(`is_official.eq.true,club_id.eq.${createdBy}`)
+            .order('is_official', { ascending: false })
+            .order('name');
+        if (error) throw error;
+        setCategories(data || []);
+    } catch (err: any) {
+        setError('Erro ao carregar categorias.');
+    } finally {
+        setIsLoadingCategories(false);
+    }
+  };
+  
+  // ... (MANTER TODAS AS OUTRAS FUNÇÕES: handleInputChange, handleCategoryToggle, handleSubmit, etc.)
+    const handleCreateCustomCategory = async () => {
   try {
     if (!customCategory.name.trim()) {
       setError('Nome da categoria é obrigatório')
@@ -107,33 +154,6 @@ const handleCreateCustomCategory = async () => {
     setTimeout(() => setSuccess(''), 3000)
   } catch (err: any) {
     setError('Erro ao criar categoria personalizada')
-  }
-}
-
-  useEffect(() => {
-    loadCategories()
-  }, [])
-
-  const loadCategories = async () => {
-  try {
-    setIsLoadingCategories(true)
-    
-    // Buscar categorias oficiais + categorias do clube
-    const { data, error } = await supabase
-      .from('app_5732e5c77b_categories')
-      .select('*')
-      .or(`is_official.eq.true,club_id.eq.${createdBy}`)
-      .order('is_official', { ascending: false })
-      .order('name')
-
-    if (error) throw error
-
-    setCategories(data || [])
-  } catch (err: any) {
-    console.error('Error loading categories:', err)
-    setError('Erro ao carregar categorias')
-  } finally {
-    setIsLoadingCategories(false)
   }
 }
 
@@ -215,19 +235,14 @@ const handleCreateCustomCategory = async () => {
         return
       }
 
-      // Prepare dates
-      const startDate = new Date(formData.startDate)
-      startDate.setHours(9, 0, 0, 0)
+    // Prepare dates by using the string directly, letting Supabase handle it as UTC.
+      const startDateValue = formData.startDate;
+      const endDateValue = formData.endDate || formData.startDate;
       
-      const endDate = formData.endDate 
-        ? new Date(formData.endDate)
-        : new Date(formData.startDate)
-      endDate.setHours(18, 0, 0, 0)
-      
-      const registrationDeadline = formData.registrationDeadline
-        ? new Date(formData.registrationDeadline)
-        : new Date(startDate.getTime() - 7 * 24 * 60 * 60 * 1000)
-      registrationDeadline.setHours(23, 59, 59, 999)
+      // Calculate a default deadline if not provided
+      const registrationDeadlineValue = formData.registrationDeadline 
+        ? formData.registrationDeadline
+        : formatDateForInput(new Date(new Date(formData.startDate).getTime() - 7 * 24 * 60 * 60 * 1000));
 
       if (editTournament) {
         // UPDATE EXISTING TOURNAMENT
@@ -236,9 +251,9 @@ const handleCreateCustomCategory = async () => {
           .update({
             name: formData.name,
             description: formData.description || null,
-            start_date: startDate.toISOString(),
-            end_date: endDate.toISOString(),
-            registration_deadline: registrationDeadline.toISOString(),
+            start_date: startDateValue,
+            end_date: endDateValue,
+            registration_deadline: registrationDeadlineValue,
             location: formData.location,
             max_participants: parseInt(formData.maxParticipants) || 32,
             format: formData.format,
@@ -286,9 +301,9 @@ const handleCreateCustomCategory = async () => {
           .insert([{
             name: formData.name,
             description: formData.description || null,
-            start_date: startDate.toISOString(),
-            end_date: endDate.toISOString(),
-            registration_deadline: registrationDeadline.toISOString(),
+            start_date: startDateValue,
+            end_date: endDateValue,
+            registration_deadline: registrationDeadlineValue,
             location: formData.location,
             max_participants: parseInt(formData.maxParticipants) || 32,
             format: formData.format,
@@ -364,7 +379,8 @@ const handleCreateCustomCategory = async () => {
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
-      <div className="flex items-center justify-between">
+      {/* ... (o restante do JSX do componente pode ser mantido como está) ... */}
+            <div className="flex items-center justify-between">
         <div>
           <h2 className="text-3xl font-bold">
             {editTournament ? 'Editar Torneio' : 'Criar Novo Torneio'}

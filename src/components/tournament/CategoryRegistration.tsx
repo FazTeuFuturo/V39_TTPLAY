@@ -68,9 +68,11 @@ export function CategoryRegistration({ tournament, athleteUser, onClose }: Categ
     )
   }
 
+// Em src/components/tournament/CategoryRegistration.tsx
+
   const handleFinalizeRegistration = async () => {
     if (selectedCategories.length === 0) {
-      setError('Você precisa selecionar pelo menos uma categoria.')
+      setError('Você precisa selecionar pelo menos uma categoria.');
       return
     }
     setIsLoading(true)
@@ -78,50 +80,70 @@ export function CategoryRegistration({ tournament, athleteUser, onClose }: Categ
     setSuccess('')
 
     try {
-      // 1. Encontra ou cria a inscrição principal para o atleta no torneio
-      let { data: registration } = await supabase
+      // 1. Tenta encontrar um registro existente para o atleta neste torneio.
+      let { data: registration, error: registrationError } = await supabase
         .from('app_5732e5c77b_tournament_registrations')
         .select('id')
         .eq('tournament_id', tournament.id)
         .eq('athlete_id', athleteUser.id)
-        .single()
+        .single();
 
-      if (!registration) {
+      // 2. Lógica Corrigida: Se o registro não foi encontrado, CRIA um novo.
+      // O erro 'PGRST116' significa "zero linhas retornadas", que é o que esperamos quando o atleta ainda não se inscreveu.
+      if (registrationError && registrationError.code === 'PGRST116') {
         const { data: newRegistration, error: createError } = await supabase
           .from('app_5732e5c77b_tournament_registrations')
-          .insert({ tournament_id: tournament.id, athlete_id: athleteUser.id, status: 'pending_payment' })
+          .insert({ 
+              tournament_id: tournament.id, 
+              athlete_id: athleteUser.id, 
+              status: 'registered' // Usando o status válido
+          })
           .select('id')
-          .single()
-        if (createError) throw createError
-        registration = newRegistration
+          .single();
+        
+        // Se houver um erro na criação, lança o erro.
+        if (createError) throw createError;
+        
+        // Se a criação for bem-sucedida, usamos o novo registro.
+        registration = newRegistration;
+      } else if (registrationError) {
+        // Se for qualquer outro erro na busca, lança o erro.
+        throw registrationError;
+      }
+      
+      // 3. Validação final: se chegamos aqui sem um registro, algo deu muito errado.
+      if (!registration) {
+        throw new Error("Falha crítica ao obter o ID de registro.");
       }
 
-      // 2. Insere as categorias selecionadas
+      // 4. Prepara e insere os dados das categorias selecionadas.
       const registrationCategories = selectedCategories.map(catId => {
-        const categoryDetails = tournament.categories.find(c => c.id === catId);
+        // A lógica para encontrar categoryDetails pode precisar de ajuste se a prop 'tournament.categories' não tiver o 'id' correto
+        const categoryDetails = tournament.categories?.find(c => c.id === catId);
         return {
           registration_id: registration!.id,
           category_id: catId,
-          price_paid: categoryDetails?.price || 0 // Ou calcular o preço final com descontos
+          price_paid: categoryDetails?.price || 0 
         }
       });
       
       const { error: catError } = await supabase
         .from('app_5732e5c77b_registration_categories')
-        .insert(registrationCategories)
+        .insert(registrationCategories);
 
-      if (catError) throw catError
+      if (catError) throw catError;
 
-      setSuccess('Inscrição realizada com sucesso! Aguardando pagamento.')
+      setSuccess('Inscrição realizada com sucesso! Aguardando confirmação.');
+      
       setTimeout(() => {
-        onClose(); // Fecha o modal após 2 segundos
+        onClose();
       }, 2000);
 
     } catch (err: any) {
-      setError(err.message || 'Ocorreu um erro ao finalizar a inscrição.')
-      console.error(err)
+      setError(err.message || 'Ocorreu um erro ao finalizar a inscrição. Verifique se você já não está inscrito em alguma dessas categorias.');
+      console.error(err);
     } finally {
-      setIsLoading(false)
+      setIsLoading(false);
     }
   }
 

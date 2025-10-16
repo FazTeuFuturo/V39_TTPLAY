@@ -1,63 +1,42 @@
+// src/components/tournament/RegistrationManager.tsx
+
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Tooltip, TooltipProvider, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { 
-  Users, UserPlus, UserMinus, Search, Filter, 
-  Star, MapPin, Calendar, CheckCircle, AlertCircle, X
+  Users, UserPlus, UserMinus, Search, 
+  CheckCircle, AlertCircle, X, Loader2
 } from 'lucide-react'
-import { supabase } from '@/lib/supabase' // <<< 1. Importado o Supabase
+import { supabase } from '@/lib/supabase'
+import { Tournament, TournamentCategory } from '@/lib/types'
+import { SupabaseUser } from '@/lib/supabase-auth'
 
-// Tipos ajustados para refletir a estrutura do banco de dados
-interface Category {
-  id: string
-  name: string
-  price: number
-  // Adicione outros campos da categoria se precisar para validação
-  gender?: string
-  age_min?: number
-  age_max?: number
-  rating_min?: number
-  rating_max?: number
+// Interface para representar uma inscrição com detalhes completos
+interface EnrichedRegistration {
+  registration_id: string;
+  category_registration_id?: string;
+  category_id: string;
+  category_name: string;
+  athlete: SupabaseUser;
 }
 
-interface Tournament {
-  id: string
-  name: string
-  maxParticipants: number
-  categories?: Category[] // <<< 2. Alterado de string[] para um objeto de Categoria
-}
-
-interface Athlete {
-  id: string
-  name: string
-  birth_date: string // Mantido como string, mas convertido para Date no uso
-  playing_level: string
-  current_rating: number
-  city: string
-  gender: string
-  // Adicione outros campos se necessário
-  wins: number
-  losses: number
-  age?: number // Campo calculado
-}
-
-interface Registration {
-  id: string // ID da tabela registration_categories para remoção
-  registration_id: string // ID da tabela tournament_registrations
-  athlete_id: string
-  category_id: string
-  category_name: string
-  athlete_name: string
-  athlete_rating: number
-  athlete_city: string
-  athlete_level: string
+// Interface para os detalhes das categorias do torneio
+interface CategoryDetail {
+    id: string;
+    name: string;
+    price: number;
+    gender?: 'male' | 'female' | 'mixed';
+    age_min?: number;
+    age_max?: number;
+    rating_min?: number;
+    rating_max?: number;
 }
 
 interface RegistrationManagerProps {
@@ -67,302 +46,482 @@ interface RegistrationManagerProps {
 }
 
 export function RegistrationManager({ tournament, onClose, onUpdate }: RegistrationManagerProps) {
-  const [athletes, setAthletes] = useState<Athlete[]>([])
-  const [registrations, setRegistrations] = useState<Registration[]>([])
+  const [registrations, setRegistrations] = useState<EnrichedRegistration[]>([])
+  const [searchedAthletes, setSearchedAthletes] = useState<SupabaseUser[]>([]);
+  const [tournamentCategories, setTournamentCategories] = useState<CategoryDetail[]>([]);
   const [selectedCategoryId, setSelectedCategoryId] = useState('')
   const [searchTerm, setSearchTerm] = useState('')
-  const [filterLevel, setFilterLevel] = useState('all')
   const [isLoading, setIsLoading] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isSearching, setIsSearching] = useState(false);
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
 
+  const loadInitialData = useCallback(async () => {
+    setIsLoading(true);
+    setError('');
+    try {
+        await Promise.all([
+            loadRegistrations(),
+            loadTournamentCategoryDetails()
+        ]);
+    } catch (err) {
+      setError('Falha ao carregar dados do torneio.');
+      console.error(err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [tournament.id]);
+
   useEffect(() => {
-    // Função para buscar todos os dados iniciais do Supabase
-    const fetchData = async () => {
-      setIsLoading(true)
-      setError('')
-      await Promise.all([
-        loadAthletes(),
-        loadRegistrations()
-      ]).catch(err => {
-        setError('Falha ao carregar dados iniciais.')
-        console.error(err)
-      })
-      setIsLoading(false)
+    loadInitialData();
+  }, [loadInitialData]);
+
+  // Busca os detalhes completos das categorias deste torneio
+  const loadTournamentCategoryDetails = async () => {
+    const categoryIds = tournament.categories?.map(c => c.categoryId) || [];
+    if (categoryIds.length === 0) {
+        setTournamentCategories([]);
+        return;
+    }
+    const { data, error } = await supabase
+        .from('app_5732e5c77b_categories')
+        .select('*')
+        .in('id', categoryIds);
+
+    if (error) {
+        console.error("Error fetching category details:", error);
+        return;
     }
     
-    if (tournament.id) {
-      fetchData()
-    }
-  }, [tournament.id])
+    // Adiciona o preço à categoria
+    const categoriesWithPrices = data.map(cat => {
+        const catWithPrice = tournament.categories?.find(tc => tc.categoryId === cat.id);
+        return { ...cat, price: catWithPrice?.price || 0 };
+    });
 
-  // <<< 3. Função reescrita para usar Supabase
-  const loadAthletes = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('app_5732e5c77b_athletes')
-        .select('id, name, birth_date, playing_level, current_rating, city, gender, wins, losses')
-
-      if (error) throw error
-
-      const athletesWithAge = data.map(athlete => ({
-        ...athlete,
-        age: calculateAge(new Date(athlete.birth_date))
-      }))
-      setAthletes(athletesWithAge)
-    } catch (err) {
-      console.error('Error loading athletes:', err)
-      setError('Erro ao carregar atletas do banco de dados.')
+    setTournamentCategories(categoriesWithPrices);
+    // Seleciona a primeira categoria por padrão
+    if (categoriesWithPrices.length > 0) {
+        setSelectedCategoryId(categoriesWithPrices[0].id);
     }
   }
 
-  // <<< 4. Função reescrita para usar Supabase com joins
+  // FUNÇÃO loadRegistrations - VERSÃO COM JOIN ÚNICO
   const loadRegistrations = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('app_5732e5c77b_registration_categories')
-        .select(`
-          id,
-          registration_id,
-          category_id,
-          app_5732e5c77b_categories ( name ),
-          app_5732e5c77b_tournament_registrations (
-            athlete_id,
-            tournament_id,
-            app_5732e5c77b_athletes (
-              name,
-              current_rating,
-              city,
-              playing_level
-            )
-          )
-        `)
-        .eq('app_5732e5c77b_tournament_registrations.tournament_id', tournament.id)
-
-      if (error) throw error
-      
-      const formattedRegistrations = data.map((reg: any) => ({
-        id: reg.id,
-        registration_id: reg.registration_id,
-        athlete_id: reg.app_5732e5c77b_tournament_registrations.athlete_id,
-        category_id: reg.category_id,
-        category_name: reg.app_5732e5c77b_categories.name,
-        athlete_name: reg.app_5732e5c77b_tournament_registrations.app_5732e5c77b_athletes.name,
-        athlete_rating: reg.app_5732e5c77b_tournament_registrations.app_5732e5c77b_athletes.current_rating,
-        athlete_city: reg.app_5732e5c77b_tournament_registrations.app_5732e5c77b_athletes.city,
-        athlete_level: reg.app_5732e5c77b_tournament_registrations.app_5732e5c77b_athletes.playing_level,
-      }))
-
-      setRegistrations(formattedRegistrations)
-    } catch (err) {
-      console.error('Error loading registrations:', err)
-      setError('Erro ao carregar inscrições do banco de dados.')
-    }
-  }
-
-  const calculateAge = (birthDate: Date): number => {
-    const today = new Date()
-    let age = today.getFullYear() - birthDate.getFullYear()
-    const m = today.getMonth() - birthDate.getMonth()
-    if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
-      age--
-    }
-    return age
-  }
-  
-  // As validações agora podem ser mais robustas com os dados da categoria
-  const validateAthleteForCategory = (athlete: Athlete, category?: Category): boolean => {
-    if (!category) return false;
+  setRegistrations([]); // ← LIMPA O ESTADO PRIMEIRO
+  console.log('🔍 Iniciando loadRegistrations para tournament:', tournament.id);
     
-    // Validar gênero
-    if (category.gender && category.gender !== 'mixed' && category.gender !== athlete.gender) return false;
+    // NOVA ESTRATÉGIA: Começar por tournament_registrations e fazer join com tudo
+    const { data: registrationsData, error: regError } = await supabase
+      .from('app_5732e5c77b_tournament_registrations')
+      .select(`
+        id,
+        athlete_id,
+        tournament_id
+      `)
+      .eq('tournament_id', tournament.id);
 
-    // Validar idade
-    if (athlete.age) {
-        if (category.age_min && athlete.age < category.age_min) return false;
-        if (category.age_max && athlete.age > category.age_max) return false;
+    console.log('📦 Tournament Registrations:', registrationsData);
+
+    if (regError) {
+      console.error('❌ Error loading registrations:', regError);
+      throw regError;
     }
-    
-    // Validar rating
-    if (category.rating_min && athlete.current_rating < category.rating_min) return false;
-    if (category.rating_max && athlete.current_rating > category.rating_max) return false;
 
-    return true
-  }
+    if (!registrationsData || registrationsData.length === 0) {
+      console.log('⚠️ Nenhuma inscrição encontrada');
+      setRegistrations([]);
+      return;
+    }
 
-  const isAthleteRegistered = (athleteId: string, categoryId: string): boolean => {
-    return registrations.some(reg => reg.athlete_id === athleteId && reg.category_id === categoryId)
-  }
-  
-  // <<< 5. Função reescrita para inserir no Supabase
-  const handleRegisterAthlete = async (athlete: Athlete, categoryId: string) => {
-    setIsSubmitting(true)
-    setError('')
-    setMessage('')
-    const category = tournament.categories?.find(c => c.id === categoryId)
+    // Buscar as categorias de cada registration
+    const registrationIds = registrationsData.map(r => r.id);
+    const { data: regCategoriesData, error: catError } = await supabase
+      .from('app_5732e5c77b_registration_categories')
+      .select(`
+        id,
+        registration_id,
+        category_id,
+        app_5732e5c77b_categories ( name )
+      `)
+      .in('registration_id', registrationIds);
+
+    console.log('📂 Registration Categories:', regCategoriesData);
+
+    if (catError) {
+      console.error('❌ Error loading categories:', catError);
+      throw catError;
+    }
+
+    // Buscar dados dos atletas (que TEM o nome via RLS!)
+    const athleteIds = [...new Set(registrationsData.map(r => r.athlete_id))];
+    console.log('👥 Athlete IDs:', athleteIds);
+
+    // Tentar buscar users (pode falhar por RLS)
+    const usersResult = await supabase
+      .from('app_5732e5c77b_users')
+      .select('*')
+      .in('id', athleteIds);
+
+    // Buscar athletes (deve funcionar)
+    const athletesResult = await supabase
+      .from('app_5732e5c77b_athletes')
+      .select('*')
+      .in('id', athleteIds);
+
+    console.log('👤 Users result:', usersResult);
+    console.log('🏃 Athletes result:', athletesResult);
+
+    if (athletesResult.error) {
+      console.error('❌ Erro ao buscar atletas:', athletesResult.error);
+      throw athletesResult.error;
+    }
+
+    // Se users falhar por RLS, apenas alerta mas continua
+    if (usersResult.error) {
+      console.warn('⚠️ Sem acesso a users (RLS):', usersResult.error);
+    }
+
+    const usersData = usersResult.data || [];
+    const athletesData = athletesResult.data || [];
+
+    // Criar mapas
+    const usersMap = new Map(usersData.map(u => [u.id, u]));
+    const athletesMap = new Map(athletesData.map(a => [a.id, a]));
+    const regCategoriesMap = new Map(
+      (regCategoriesData || []).map((rc: any) => [rc.registration_id, rc])
+    );
+
+    // Montar resultado final
+    const formattedRegistrations: EnrichedRegistration[] = registrationsData
+      .map(reg => {
+        const regCat = regCategoriesMap.get(reg.id);
+        if (!regCat) return null; // Pula se não tiver categoria
+
+        const athleteId = reg.athlete_id;
+        const userData = usersMap.get(athleteId);
+        const athleteData = athletesMap.get(athleteId);
+
+        console.log('🔗 Montando registro:', {
+          regId: reg.id,
+          athleteId,
+          hasUser: !!userData,
+          hasAthlete: !!athleteData,
+          userName: userData?.name
+        });
+
+        return {
+          registration_id: reg.id,
+          category_registration_id: regCat.id,
+          category_id: regCat.category_id,
+          category_name: regCat.app_5732e5c77b_categories?.name || 'Sem nome',
+          athlete: {
+            ...athleteData,
+            id: athleteId,
+            name: userData?.name || 'Nome não encontrado',
+            email: userData?.email || '',
+            userType: 'athlete',
+          } as SupabaseUser,
+        };
+      })
+      .filter(Boolean) as EnrichedRegistration[];
+
+    console.log('✨ Registrations formatadas:', formattedRegistrations);
+    setRegistrations(formattedRegistrations);
+  };
+
+  // FUNÇÃO searchAthletes - VERSÃO CORRETA baseada no schema real
+  const searchAthletes = async (term: string) => {
+    setSearchTerm(term);
+    if (term.length < 3) {
+      setSearchedAthletes([]);
+      return;
+    }
+    setIsSearching(true);
+    setError('');
 
     try {
-      // 1. Encontrar ou criar a inscrição principal do atleta no torneio
-      let { data: registration } = await supabase
-        .from('app_5732e5c77b_tournament_registrations')
+      const cleanedTerm = term.replace(/\D/g, '');
+      let athleteIds: string[] = [];
+
+      // Busca 1: Por nome na tabela users
+      const { data: usersByName, error: nameError } = await supabase
+        .from('app_5732e5c77b_users')
         .select('id')
-        .eq('tournament_id', tournament.id)
-        .eq('athlete_id', athlete.id)
-        .single()
+        .eq('user_type', 'athlete')
+        .ilike('name', `%${term}%`)
+        .limit(10);
 
-      if (!registration) {
-        const { data: newRegistration, error: createError } = await supabase
-          .from('app_5732e5c77b_tournament_registrations')
-          .insert({ tournament_id: tournament.id, athlete_id: athlete.id, status: 'registered' })
+      if (nameError) throw nameError;
+      
+      athleteIds = usersByName?.map(u => u.id) || [];
+
+      // Busca 2: Por CPF na tabela athletes (se o termo for numérico)
+      if (cleanedTerm.length >= 3) {
+        const { data: athletesByCpf, error: cpfError } = await supabase
+          .from('app_5732e5c77b_athletes')
           .select('id')
-          .single()
-        if (createError) throw createError
-        registration = newRegistration
+          .ilike('cpf', `%${cleanedTerm}%`)
+          .limit(10);
+
+        if (cpfError) throw cpfError;
+
+        // Adiciona os IDs encontrados por CPF
+        if (athletesByCpf && athletesByCpf.length > 0) {
+          athleteIds = [...athleteIds, ...athletesByCpf.map(a => a.id)];
+        }
       }
 
-      // 2. Adicionar a categoria a essa inscrição
-      const { error: catError } = await supabase
-        .from('app_5732e5c77b_registration_categories')
-        .insert({
-          registration_id: registration.id,
-          category_id: categoryId,
-          price_paid: category?.price || 0 // Pega o preço da categoria
-        })
-      if (catError) throw catError
+      // Remove duplicatas
+      athleteIds = [...new Set(athleteIds)];
 
-      setMessage(`${athlete.name} inscrito com sucesso em ${category?.name}!`)
-      await loadRegistrations() // Recarrega a lista para atualizar a UI
+      if (athleteIds.length === 0) {
+        setSearchedAthletes([]);
+        setIsSearching(false);
+        return;
+      }
+
+      // Busca os dados completos dos usuários encontrados
+      const { data: usersData, error: usersError } = await supabase
+        .from('app_5732e5c77b_users')
+        .select('id, name, email, user_type')
+        .in('id', athleteIds);
+
+      if (usersError) throw usersError;
+
+      // Busca os dados dos atletas correspondentes
+      // Lembre-se: athletes.id = users.id (mesma chave!)
+      const { data: athletesData, error: athletesError } = await supabase
+        .from('app_5732e5c77b_athletes')
+        .select('*')
+        .in('id', athleteIds);
+
+      if (athletesError) throw athletesError;
+
+      // Criar mapa dos atletas
+      const athletesMap = new Map(athletesData?.map(a => [a.id, a]) || []);
+
+      // Montar o resultado final
+      const formattedData: SupabaseUser[] = (usersData || []).map(user => {
+        const athleteData = athletesMap.get(user.id);
+        return {
+          // Dados do athlete
+          ...athleteData,
+          // Dados do user (sobrescreve)
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          userType: 'athlete',
+        } as SupabaseUser;
+      });
+
+      setSearchedAthletes(formattedData);
 
     } catch (err: any) {
-      console.error('Error registering athlete:', err)
-      setError(err.message || 'Erro ao inscrever atleta.')
+      console.error("Error searching athletes:", err);
+      setError("Erro ao buscar atletas. Verifique as políticas RLS.");
+      setSearchedAthletes([]);
     } finally {
-      setIsSubmitting(false)
+      setIsSearching(false);
     }
-  }
-
-  // <<< 6. Função reescrita para deletar do Supabase
-  const handleUnregisterAthlete = async (registration: Registration) => {
-    const confirmed = window.confirm(`Remover ${registration.athlete_name} da categoria ${registration.category_name}?`)
-    if (confirmed) {
-      setIsSubmitting(true)
-      try {
-        const { error } = await supabase
-          .from('app_5732e5c77b_registration_categories')
-          .delete()
-          .eq('id', registration.id) // Deleta pelo ID único da relação
-        
-        if (error) throw error
-
-        setMessage(`${registration.athlete_name} removido com sucesso.`)
-        await loadRegistrations() // Recarrega para atualizar a UI
-      } catch (err: any) {
-        setError(err.message || 'Erro ao remover inscrição.')
-      } finally {
-        setIsSubmitting(false)
-      }
-    }
-  }
-
-  const getLevelText = (level: string): string => {
-    const levels: { [key: string]: string } = {
-      beginner: 'Iniciante',
-      intermediate: 'Intermediário',
-      advanced: 'Avançado',
-      professional: 'Profissional'
-    }
-    return levels[level] || level
-  }
+  };
   
-  // ... (getLevelBadgeColor pode ser mantida como está)
+  // LÓGICA DE VALIDAÇÃO
+  const getAthleteEligibility = (athlete: SupabaseUser, categoryId: string): { eligible: boolean, reason: string } => {
+    const category = tournamentCategories.find(c => c.id === categoryId);
+    if (!category) return { eligible: false, reason: 'Categoria não encontrada' };
+    
+    if (registrations.some(r => r.athlete.id === athlete.id && r.category_id === categoryId)) {
+        return { eligible: false, reason: 'Já inscrito' };
+    }
 
-  const selectedCategory = tournament.categories?.find(c => c.id === selectedCategoryId)
+    const athleteAge = athlete.birth_date ? new Date().getFullYear() - new Date(athlete.birth_date).getFullYear() : undefined;
+    if (athleteAge !== undefined) {
+        if (category.age_min && athleteAge < category.age_min) return { eligible: false, reason: `Idade mínima: ${category.age_min}` };
+        if (category.age_max && athleteAge > category.age_max) return { eligible: false, reason: `Idade máxima: ${category.age_max}` };
+    }
 
-  const eligibleAthletes = athletes.filter(athlete => {
-    if (!selectedCategoryId) return false;
-    if (!validateAthleteForCategory(athlete, selectedCategory)) return false
-    if (searchTerm && !athlete.name.toLowerCase().includes(searchTerm.toLowerCase())) return false
-    if (filterLevel !== 'all' && athlete.playing_level !== filterLevel) return false
-    return true
-  })
+    if (athlete.current_rating) {
+        if (category.rating_min && athlete.current_rating < category.rating_min) return { eligible: false, reason: `Rating mínimo: ${category.rating_min}` };
+        if (category.rating_max && athlete.current_rating > category.rating_max) return { eligible: false, reason: `Rating máximo: ${category.rating_max}` };
+    }
+    
+    if (category.gender !== 'mixed' && athlete.gender && category.gender !== athlete.gender) {
+        return { eligible: false, reason: 'Gênero incompatível' };
+    }
 
-  const categoryRegistrations = registrations.filter(reg => reg.category_id === selectedCategoryId)
-  
-  if (isLoading) {
-    return <div>Carregando gerenciador de inscrições...</div>
+    return { eligible: true, reason: '' };
   }
+
+const handleRegisterAthlete = async (athlete: SupabaseUser, categoryId: string) => {
+  setIsSubmitting(true);
+  setError('');
+  setMessage('');
+
+  try {
+    console.log('➕ Adicionando atleta:', athlete.name, 'na categoria:', categoryId);
+    
+    // 1. Buscar registration existente
+    const { data: existingRegs, error: checkError } = await supabase
+      .from('app_5732e5c77b_tournament_registrations')
+      .select('id')
+      .eq('tournament_id', tournament.id)
+      .eq('athlete_id', athlete.id);
+
+    if (checkError) throw checkError;
+
+    let registrationId: string;
+
+    if (existingRegs && existingRegs.length > 0) {
+      // Usa o primeiro (pode haver órfãos, mas tudo bem)
+      registrationId = existingRegs[0].id;
+      console.log('♻️ Reutilizando registration existente:', registrationId);
+    } else {
+      // Criar novo tournament_registration
+      console.log('🆕 Criando novo tournament_registration');
+      const { data: newReg, error: regError } = await supabase
+        .from('app_5732e5c77b_tournament_registrations')
+        .insert({
+          tournament_id: tournament.id,
+          athlete_id: athlete.id,
+          status: 'registered',
+          total_paid: 0
+        })
+        .select()
+        .single();
+
+      if (regError) throw regError;
+      registrationId = newReg.id;
+      console.log('✅ Novo registration criado:', registrationId);
+    }
+
+    // 2. Buscar o preço da categoria
+    const categoryPrice = tournamentCategories.find(c => c.id === categoryId)?.price || 0;
+
+    // 3. Criar o registration_category
+    console.log('➕ Criando registration_category');
+    const { error: catError } = await supabase
+      .from('app_5732e5c77b_registration_categories')
+      .insert({
+        registration_id: registrationId,
+        category_id: categoryId,
+        price_paid: categoryPrice
+      });
+
+    if (catError) throw catError;
+    console.log('✅ Registration_category criado!');
+
+    // 4. Recarregar dados e limpar busca
+    await loadRegistrations();
+    if (onUpdate) {
+      onUpdate({ ...tournament });
+    }
+    setSearchedAthletes([]);
+    setSearchTerm('');
+    setMessage(`${athlete.name} adicionado com sucesso!`);
+    setTimeout(() => setMessage(''), 3000);
+
+  } catch (err: any) {
+    console.error('❌ Error registering athlete:', err);
+    setError('Erro ao adicionar atleta: ' + err.message);
+  } finally {
+    setIsSubmitting(false);
+  }
+}
+
+const handleUnregisterAthlete = async (registration: EnrichedRegistration) => {
+  if (!confirm(`Tem certeza que deseja remover ${registration.athlete.name} da categoria ${registration.category_name}?`)) {
+    return;
+  }
+
+  setIsSubmitting(true);
+  setError('');
+
+  try {
+    console.log('🗑️ Removendo registration_category:', registration.category_registration_id);
+    
+    // 1. Deletar o registro da categoria
+    const { error: deleteCatError } = await supabase
+      .from('app_5732e5c77b_registration_categories')
+      .delete()
+      .eq('id', registration.category_registration_id);
+
+    if (deleteCatError) throw deleteCatError;
+
+    // 2. Verificar se o atleta ainda tem outras categorias neste torneio
+    const { data: remainingCategories, error: checkError } = await supabase
+      .from('app_5732e5c77b_registration_categories')
+      .select('id')
+      .eq('registration_id', registration.registration_id);
+
+    console.log('📋 Categorias restantes:', remainingCategories);
+
+    if (checkError) throw checkError;
+
+    // 3. Se não tem mais categorias, deletar o registro principal também
+    if (!remainingCategories || remainingCategories.length === 0) {
+      console.log('🗑️ Deletando tournament_registration:', registration.registration_id);
+      
+      const { error: deleteRegError } = await supabase
+        .from('app_5732e5c77b_tournament_registrations')
+        .delete()
+        .eq('id', registration.registration_id);
+
+      if (deleteRegError) throw deleteRegError;
+      
+      console.log('✅ Tournament registration deletado!');
+    }
+
+    // 4. Recarregar os dados LOCAIS
+    await loadRegistrations();
+    
+    // 5. NOVO: Notificar o componente pai (Dashboard) para atualizar
+    if (onUpdate) {
+      onUpdate({ ...tournament });
+    } // Força o dashboard a recarregar
+    
+    setMessage(`${registration.athlete.name} removido com sucesso!`);
+    setTimeout(() => setMessage(''), 3000);
+  } catch (err: any) {
+    console.error('❌ Error removing registration:', err);
+    setError('Erro ao remover inscrição: ' + err.message);
+  } finally {
+    setIsSubmitting(false);
+  }
+}
+
+  const categoryRegistrations = registrations.filter(reg => reg.category_id === selectedCategoryId);
+  const selectedCategoryDetails = tournamentCategories.find(c => c.id === selectedCategoryId);
 
   return (
+    <TooltipProvider>
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold">Gerenciar Inscrições</h2>
           <p className="text-muted-foreground">{tournament.name}</p>
         </div>
-        <Button variant="outline" onClick={onClose}>
-          <X className="h-4 w-4 mr-2" />
-          Fechar
-        </Button>
+        <Button variant="outline" onClick={onClose}><X className="h-4 w-4 mr-2" /> Fechar</Button>
       </div>
 
-      {/* Messages */}
-      {message && (
-        <Alert className="border-green-200 bg-green-50" onClick={() => setMessage('')}>
-          <CheckCircle className="h-4 w-4 text-green-600" />
-          <AlertDescription className="text-green-800">{message}</AlertDescription>
-        </Alert>
-      )}
+      {error && <Alert variant="destructive"><AlertCircle className="h-4 w-4" /><AlertDescription>{error}</AlertDescription></Alert>}
 
-      {error && (
-        <Alert variant="destructive" onClick={() => setError('')}>
-          <AlertCircle className="h-4 w-4" />
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
-      
-      {/* Statistics */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-sm font-medium text-muted-foreground">Atletas na Base</p>
-            <p className="text-2xl font-bold">{athletes.length}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-sm font-medium text-muted-foreground">Inscrições Totais</p>
-            <p className="text-2xl font-bold">{registrations.length}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-sm font-medium text-muted-foreground">Vagas Restantes</p>
-            <p className="text-2xl font-bold">{Math.max(0, tournament.maxParticipants - registrations.length)}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-sm font-medium text-muted-foreground">Categorias</p>
-            <p className="text-2xl font-bold">{tournament.categories?.length || 0}</p>
-          </CardContent>
-        </Card>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <Card><CardContent className="p-4"><p className="text-sm font-medium text-muted-foreground">Inscrições Totais</p><p className="text-2xl font-bold">{registrations.length}</p></CardContent></Card>
+        <Card><CardContent className="p-4"><p className="text-sm font-medium text-muted-foreground">Vagas Restantes</p><p className="text-2xl font-bold">{Math.max(0, tournament.maxParticipants - registrations.length)}</p></CardContent></Card>
+        <Card><CardContent className="p-4"><p className="text-sm font-medium text-muted-foreground">Categorias</p><p className="text-2xl font-bold">{tournamentCategories.length}</p></CardContent></Card>
       </div>
 
-      {/* Category Selection */}
       <Card>
         <CardHeader>
           <CardTitle>1. Selecionar Categoria</CardTitle>
-          <CardDescription>Escolha uma categoria para ver os atletas elegíveis e gerenciar inscrições.</CardDescription>
         </CardHeader>
         <CardContent>
           <Select value={selectedCategoryId} onValueChange={setSelectedCategoryId}>
-            <SelectTrigger>
-              <SelectValue placeholder="Escolha uma categoria..." />
-            </SelectTrigger>
+            <SelectTrigger><SelectValue placeholder="Escolha uma categoria para visualizar..." /></SelectTrigger>
             <SelectContent>
-              {tournament.categories?.map(category => (
+              {tournamentCategories.map(category => (
                 <SelectItem key={category.id} value={category.id}>
                   {category.name}
                 </SelectItem>
@@ -371,105 +530,72 @@ export function RegistrationManager({ tournament, onClose, onUpdate }: Registrat
           </Select>
         </CardContent>
       </Card>
-
-      {/* Athletes Management */}
-      {selectedCategoryId && (
+      
+      {isLoading ? <Loader2 className="mx-auto my-8 h-8 w-8 animate-spin text-muted-foreground" /> :
+      selectedCategoryId && (
         <>
-          {/* Filters and Eligible Athletes */}
           <Card>
             <CardHeader>
-              <CardTitle>2. Inscrever Atletas Elegíveis</CardTitle>
-              <CardDescription>
-                Filtre e inscreva atletas que cumprem os requisitos para: <span className="font-bold">{selectedCategory?.name}</span>
-              </CardDescription>
+                <CardTitle>Inscritos em "{selectedCategoryDetails?.name}"</CardTitle>
+                <CardDescription>{categoryRegistrations.length} atleta(s) nesta categoria.</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              {/* Filter Inputs */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Input
-                  placeholder="Buscar atleta por nome..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-8"
-                />
-                <Select value={filterLevel} onValueChange={setFilterLevel}>
-                  <SelectTrigger><SelectValue/></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todos os níveis</SelectItem>
-                    <SelectItem value="beginner">Iniciante</SelectItem>
-                    <SelectItem value="intermediate">Intermediário</SelectItem>
-                    <SelectItem value="advanced">Avançado</SelectItem>
-                    <SelectItem value="professional">Profissional</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Eligible Athletes List */}
-              <div className="space-y-3 max-h-96 overflow-y-auto border rounded-lg p-2">
-                {eligibleAthletes.length === 0 ? (
-                  <div className="text-center py-8 text-muted-foreground">
-                    <p>Nenhum atleta elegível encontrado com os filtros atuais.</p>
-                  </div>
-                ) : (
-                  eligibleAthletes.map(athlete => {
-                    const isRegistered = isAthleteRegistered(athlete.id, selectedCategoryId);
-                    return (
-                      <div key={athlete.id} className="flex items-center justify-between p-3 border rounded-lg">
+            <CardContent>
+                {categoryRegistrations.length === 0 ? <p className="text-muted-foreground text-center p-4">Nenhum atleta inscrito nesta categoria.</p> :
+                <div className="space-y-2">
+                    {categoryRegistrations.map(reg => (
+                        <div key={reg.registration_id + reg.category_id} className="flex items-center justify-between p-3 border rounded">
                         <div>
-                          <h4 className="font-medium">{athlete.name}</h4>
-                          <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                            <span>Rating: {athlete.current_rating}</span>
-                            <span>{athlete.city}</span>
-                            <span>{athlete.age} anos</span>
-                          </div>
+                            <h4 className="font-medium">{reg.athlete.name}</h4>
+                            <span className="text-sm text-muted-foreground">Rating: {reg.athlete.current_rating || 'N/A'} | Cidade: {reg.athlete.city || 'N/A'}</span>
                         </div>
-                        <Button 
-                          size="sm"
-                          onClick={() => handleRegisterAthlete(athlete, selectedCategoryId)}
-                          disabled={isRegistered || isSubmitting}
-                          variant={isRegistered ? "secondary" : "default"}
-                        >
-                          {isRegistered ? 'Inscrito' : (isSubmitting ? 'Inscrevendo...' : 'Inscrever')}
+                        <Button size="sm" variant="destructive" onClick={() => handleUnregisterAthlete(reg)} disabled={isSubmitting}>
+                            <UserMinus className="h-4 w-4 mr-2"/> Remover
                         </Button>
-                      </div>
-                    )
-                  })
-                )}
-              </div>
+                        </div>
+                    ))}
+                </div>
+                }
             </CardContent>
           </Card>
           
-          {/* Category Registrations List */}
-          {categoryRegistrations.length > 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle>3. Inscritos em {selectedCategory?.name}</CardTitle>
-                <CardDescription>{categoryRegistrations.length} atleta(s) nesta categoria.</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2">
-                  {categoryRegistrations.map(registration => (
-                    <div key={registration.id} className="flex items-center justify-between p-3 border rounded">
-                      <div>
-                        <h4 className="font-medium">{registration.athlete_name}</h4>
-                        <span className="text-sm text-muted-foreground">Rating: {registration.athlete_rating}</span>
-                      </div>
-                      <Button 
-                        size="sm" 
-                        variant="destructive"
-                        onClick={() => handleUnregisterAthlete(registration)}
-                        disabled={isSubmitting}
-                      >
-                        {isSubmitting ? 'Removendo...' : 'Remover'}
-                      </Button>
-                    </div>
-                  ))}
+          <Card>
+            <CardHeader><CardTitle>Adicionar Atleta Manualmente</CardTitle></CardHeader>
+            <CardContent className="space-y-4">
+                <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground"/>
+                    <Input placeholder="Buscar por Nome ou CPF..." className="pl-10" onChange={(e) => searchAthletes(e.target.value)} />
                 </div>
-              </CardContent>
-            </Card>
-          )}
+                {isSearching ? <Loader2 className="mx-auto h-6 w-6 animate-spin"/> :
+                <div className="space-y-2 max-h-48 overflow-y-auto">
+                    {searchTerm.length >= 3 && searchedAthletes.length === 0 && <p className="text-muted-foreground text-center text-sm p-4">Nenhum atleta encontrado.</p>}
+                    {searchedAthletes.map(athlete => {
+                        const eligibility = getAthleteEligibility(athlete, selectedCategoryId);
+                        return (
+                            <div key={athlete.id} className="flex items-center justify-between p-2 border rounded">
+                                <div>
+                                    <p className="font-medium">{athlete.name}</p>
+                                    <p className="text-sm text-muted-foreground">Rating: {athlete.current_rating || 'N/A'} | {athlete.city || 'N/A'}</p>
+                                </div>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <div tabIndex={0}>
+                                            <Button size="sm" onClick={() => handleRegisterAthlete(athlete, selectedCategoryId)} disabled={!eligibility.eligible}>
+                                                <UserPlus className="h-4 w-4 mr-2" /> Adicionar
+                                            </Button>
+                                        </div>
+                                    </TooltipTrigger>
+                                    {!eligibility.eligible && <TooltipContent><p>{eligibility.reason}</p></TooltipContent>}
+                                </Tooltip>
+                            </div>
+                        )
+                    })}
+                </div>
+                }
+            </CardContent>
+          </Card>
         </>
       )}
     </div>
+    </TooltipProvider>
   )
 }
