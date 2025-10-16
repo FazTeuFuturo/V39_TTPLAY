@@ -1,30 +1,23 @@
+// tsconfig.app.json - SUBSTITUA O CONTEÚDO INTEIRO
+
 {
+  "extends": "./tsconfig.json", // Herda as configurações do arquivo principal
   "compilerOptions": {
-    "target": "ES2020",
+    "composite": true,
+    "target": "ESNext",
     "useDefineForClassFields": true,
-    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
     "module": "ESNext",
-    "skipLibCheck": true,
-
-    /* Bundler mode */
-    "moduleResolution": "bundler",
-    "allowImportingTsExtensions": true,
+    "moduleResolution": "bundler", // Essencial para Vite/Next.js
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true,
     "isolatedModules": true,
-    "moduleDetection": "force",
     "noEmit": true,
-    "jsx": "react-jsx",
-
-    /* Linting */
-    "strict": false,
-    "noUnusedLocals": false,
-    "noUnusedParameters": false,
-    "noImplicitAny": false,
-    "noFallthroughCasesInSwitch": false,
-
-    "baseUrl": ".",
-    "paths": {
-      "@/*": ["./src/*"]
-    }
+    "jsx": "react-jsx", // Padrão moderno do React
+    "strict": true,
+    "noUnusedLocals": false, // Relaxado conforme sua preferência
+    "noUnusedParameters": false, // Relaxado conforme sua preferência
+    "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"]
+  "include": ["src"] // Diz ao TypeScript para olhar apenas dentro da pasta 'src'
 }

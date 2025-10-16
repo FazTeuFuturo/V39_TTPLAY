@@ -16,6 +16,7 @@ import type { StoredUser } from '@/lib/auth-storage'
 
 interface ClubProfileProps {
   user: StoredUser
+  onUpdate: (user: StoredUser) => void
 }
 
 export function ClubProfile({ user }: ClubProfileProps) {

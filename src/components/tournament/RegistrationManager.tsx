@@ -8,12 +8,57 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Separator } from '@/components/ui/separator'
 import { 
   Users, UserPlus, UserMinus, Search, Filter, 
   Star, MapPin, Calendar, CheckCircle, AlertCircle, X
 } from 'lucide-react'
-import { Tournament, PlayingLevel } from '@/lib/types'
+import { supabase } from '@/lib/supabase' // <<< 1. Importado o Supabase
+
+// Tipos ajustados para refletir a estrutura do banco de dados
+interface Category {
+  id: string
+  name: string
+  price: number
+  // Adicione outros campos da categoria se precisar para validação
+  gender?: string
+  age_min?: number
+  age_max?: number
+  rating_min?: number
+  rating_max?: number
+}
+
+interface Tournament {
+  id: string
+  name: string
+  maxParticipants: number
+  categories?: Category[] // <<< 2. Alterado de string[] para um objeto de Categoria
+}
+
+interface Athlete {
+  id: string
+  name: string
+  birth_date: string // Mantido como string, mas convertido para Date no uso
+  playing_level: string
+  current_rating: number
+  city: string
+  gender: string
+  // Adicione outros campos se necessário
+  wins: number
+  losses: number
+  age?: number // Campo calculado
+}
+
+interface Registration {
+  id: string // ID da tabela registration_categories para remoção
+  registration_id: string // ID da tabela tournament_registrations
+  athlete_id: string
+  category_id: string
+  category_name: string
+  athlete_name: string
+  athlete_rating: number
+  athlete_city: string
+  athlete_level: string
+}
 
 interface RegistrationManagerProps {
   tournament: Tournament
@@ -21,231 +66,232 @@ interface RegistrationManagerProps {
   onUpdate: (tournament: Tournament) => void
 }
 
-interface TestAthlete {
-  id: string
-  name: string
-  email: string
-  phone: string
-  birthDate: Date
-  playingLevel: PlayingLevel
-  dominantHand: string
-  playingStyle: string
-  currentRating: number
-  peakRating: number
-  gamesPlayed: number
-  wins: number
-  losses: number
-  cpf: string
-  city: string
-  bio: string
-  gender?: string
-  age?: number
-}
-
-interface Registration {
-  id: string
-  athleteId: string
-  athleteName: string
-  athleteRating: number
-  athleteLevel: string
-  athleteCity: string
-  category: string
-  registeredAt: Date
-}
-
 export function RegistrationManager({ tournament, onClose, onUpdate }: RegistrationManagerProps) {
-  const [athletes, setAthletes] = useState<TestAthlete[]>([])
+  const [athletes, setAthletes] = useState<Athlete[]>([])
   const [registrations, setRegistrations] = useState<Registration[]>([])
-  const [selectedCategory, setSelectedCategory] = useState('')
+  const [selectedCategoryId, setSelectedCategoryId] = useState('')
   const [searchTerm, setSearchTerm] = useState('')
   const [filterLevel, setFilterLevel] = useState('all')
-  const [isLoading, setIsLoading] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
 
-  // Load test athletes and existing registrations
   useEffect(() => {
-    loadAthletes()
-    loadRegistrations()
-  }, [])
+    // Função para buscar todos os dados iniciais do Supabase
+    const fetchData = async () => {
+      setIsLoading(true)
+      setError('')
+      await Promise.all([
+        loadAthletes(),
+        loadRegistrations()
+      ]).catch(err => {
+        setError('Falha ao carregar dados iniciais.')
+        console.error(err)
+      })
+      setIsLoading(false)
+    }
+    
+    if (tournament.id) {
+      fetchData()
+    }
+  }, [tournament.id])
 
-  const loadAthletes = () => {
+  // <<< 3. Função reescrita para usar Supabase
+  const loadAthletes = async () => {
     try {
-      // Load from localStorage (where TestDataManager stores them)
-      const savedAthletes = localStorage.getItem('test_athletes')
-      if (savedAthletes) {
-        const parsed = JSON.parse(savedAthletes)
-        const athletesWithGenderAge = parsed.map((athlete: any) => ({
-          ...athlete,
-          birthDate: new Date(athlete.birthDate),
-          gender: inferGender(athlete.name),
-          age: calculateAge(new Date(athlete.birthDate))
-        }))
-        setAthletes(athletesWithGenderAge)
-      }
-    } catch (error) {
-      console.error('Error loading athletes:', error)
-      setError('Erro ao carregar atletas. Certifique-se de que atletas foram gerados.')
+      const { data, error } = await supabase
+        .from('app_5732e5c77b_athletes')
+        .select('id, name, birth_date, playing_level, current_rating, city, gender, wins, losses')
+
+      if (error) throw error
+
+      const athletesWithAge = data.map(athlete => ({
+        ...athlete,
+        age: calculateAge(new Date(athlete.birth_date))
+      }))
+      setAthletes(athletesWithAge)
+    } catch (err) {
+      console.error('Error loading athletes:', err)
+      setError('Erro ao carregar atletas do banco de dados.')
     }
   }
 
-  const loadRegistrations = () => {
+  // <<< 4. Função reescrita para usar Supabase com joins
+  const loadRegistrations = async () => {
     try {
-      const savedRegistrations = localStorage.getItem(`registrations_${tournament.id}`)
-      if (savedRegistrations) {
-        const parsed = JSON.parse(savedRegistrations)
-        setRegistrations(parsed.map((reg: any) => ({
-          ...reg,
-          registeredAt: new Date(reg.registeredAt)
-        })))
-      }
-    } catch (error) {
-      console.error('Error loading registrations:', error)
+      const { data, error } = await supabase
+        .from('app_5732e5c77b_registration_categories')
+        .select(`
+          id,
+          registration_id,
+          category_id,
+          app_5732e5c77b_categories ( name ),
+          app_5732e5c77b_tournament_registrations (
+            athlete_id,
+            tournament_id,
+            app_5732e5c77b_athletes (
+              name,
+              current_rating,
+              city,
+              playing_level
+            )
+          )
+        `)
+        .eq('app_5732e5c77b_tournament_registrations.tournament_id', tournament.id)
+
+      if (error) throw error
+      
+      const formattedRegistrations = data.map((reg: any) => ({
+        id: reg.id,
+        registration_id: reg.registration_id,
+        athlete_id: reg.app_5732e5c77b_tournament_registrations.athlete_id,
+        category_id: reg.category_id,
+        category_name: reg.app_5732e5c77b_categories.name,
+        athlete_name: reg.app_5732e5c77b_tournament_registrations.app_5732e5c77b_athletes.name,
+        athlete_rating: reg.app_5732e5c77b_tournament_registrations.app_5732e5c77b_athletes.current_rating,
+        athlete_city: reg.app_5732e5c77b_tournament_registrations.app_5732e5c77b_athletes.city,
+        athlete_level: reg.app_5732e5c77b_tournament_registrations.app_5732e5c77b_athletes.playing_level,
+      }))
+
+      setRegistrations(formattedRegistrations)
+    } catch (err) {
+      console.error('Error loading registrations:', err)
+      setError('Erro ao carregar inscrições do banco de dados.')
     }
-  }
-
-  const saveRegistrations = (newRegistrations: Registration[]) => {
-    localStorage.setItem(`registrations_${tournament.id}`, JSON.stringify(newRegistrations))
-  }
-
-  const inferGender = (name: string): string => {
-    const maleNames = ['João', 'José', 'Carlos', 'Antonio', 'Luiz', 'Paulo', 'Pedro', 'Marcos', 'Raimundo', 'Francisco', 'Daniel', 'Marcelo', 'Bruno', 'Eduardo', 'Felipe', 'Guilherme', 'Rafael', 'Lucas', 'Rodrigo', 'Leandro', 'Diego', 'Gabriel', 'Thiago', 'Ricardo', 'André', 'Matheus', 'Leonardo', 'Alessandro', 'Vinícius', 'Fábio', 'Gustavo', 'Igor']
-    const firstName = name.split(' ')[0]
-    return maleNames.includes(firstName) ? 'male' : 'female'
   }
 
   const calculateAge = (birthDate: Date): number => {
     const today = new Date()
     let age = today.getFullYear() - birthDate.getFullYear()
-    const monthDiff = today.getMonth() - birthDate.getMonth()
-    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+    const m = today.getMonth() - birthDate.getMonth()
+    if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
       age--
     }
     return age
   }
+  
+  // As validações agora podem ser mais robustas com os dados da categoria
+  const validateAthleteForCategory = (athlete: Athlete, category?: Category): boolean => {
+    if (!category) return false;
+    
+    // Validar gênero
+    if (category.gender && category.gender !== 'mixed' && category.gender !== athlete.gender) return false;
 
-  // MODIFIED: Bypass validations for virtual test athletes
-  const validateAthleteForCategory = (athlete: TestAthlete, category: string): boolean => {
-    // ✅ BYPASS: If it's a virtual test athlete, allow registration in any category
-    if (athlete.id.startsWith('test_athlete_')) {
-      return true
+    // Validar idade
+    if (athlete.age) {
+        if (category.age_min && athlete.age < category.age_min) return false;
+        if (category.age_max && athlete.age > category.age_max) return false;
     }
-
-    // Keep normal validations for real athletes
-    // Validate age for Sub categories
-    if (category.includes('Sub-')) {
-      const ageLimit = parseInt(category.match(/Sub-(\d+)/)?.[1] || '0')
-      if (athlete.age && athlete.age > ageLimit) return false
-    }
-
-    // Validate gender
-    if (category.includes('Masculino') && athlete.gender !== 'male') return false
-    if (category.includes('Feminino') && athlete.gender !== 'female') return false
-
-    // Validate rating for Absoluto categories
-    if (category.includes('Absoluto')) {
-      const level = category.match(/Absoluto ([A-F])/)?.[1]
-      if (level) {
-        const ratingRanges: { [key: string]: [number, number] } = {
-          'A': [2000, 2400],
-          'B': [1600, 1999],
-          'C': [1200, 1599],
-          'D': [800, 1199],
-          'E': [400, 799],
-          'F': [0, 399]
-        }
-        const [min, max] = ratingRanges[level] || [0, 3000]
-        if (athlete.currentRating < min || athlete.currentRating > max) return false
-      }
-    }
-
-    // Validate age for Veterano categories
-    if (category.includes('Veterano')) {
-      const ageLimit = parseInt(category.match(/Veterano (\d+)\+/)?.[1] || '0')
-      if (athlete.age && athlete.age < ageLimit) return false
-    }
+    
+    // Validar rating
+    if (category.rating_min && athlete.current_rating < category.rating_min) return false;
+    if (category.rating_max && athlete.current_rating > category.rating_max) return false;
 
     return true
   }
 
-  const isAthleteRegistered = (athleteId: string, category: string): boolean => {
-    return registrations.some(reg => reg.athleteId === athleteId && reg.category === category)
+  const isAthleteRegistered = (athleteId: string, categoryId: string): boolean => {
+    return registrations.some(reg => reg.athlete_id === athleteId && reg.category_id === categoryId)
   }
-
-  const handleRegisterAthlete = (athlete: TestAthlete, category: string) => {
-    if (isAthleteRegistered(athlete.id, category)) {
-      setError('Atleta já está inscrito nesta categoria')
-      return
-    }
-
-    if (registrations.length >= tournament.maxParticipants) {
-      setError('Torneio já atingiu o número máximo de participantes')
-      return
-    }
-
-    const newRegistration: Registration = {
-      id: `reg_${Date.now()}_${athlete.id}`,
-      athleteId: athlete.id,
-      athleteName: athlete.name,
-      athleteRating: athlete.currentRating,
-      athleteLevel: getLevelText(athlete.playingLevel),
-      athleteCity: athlete.city,
-      category,
-      registeredAt: new Date()
-    }
-
-    const updatedRegistrations = [...registrations, newRegistration]
-    setRegistrations(updatedRegistrations)
-    saveRegistrations(updatedRegistrations)
-    setMessage(`${athlete.name} inscrito com sucesso na categoria ${category}`)
+  
+  // <<< 5. Função reescrita para inserir no Supabase
+  const handleRegisterAthlete = async (athlete: Athlete, categoryId: string) => {
+    setIsSubmitting(true)
     setError('')
+    setMessage('')
+    const category = tournament.categories?.find(c => c.id === categoryId)
+
+    try {
+      // 1. Encontrar ou criar a inscrição principal do atleta no torneio
+      let { data: registration } = await supabase
+        .from('app_5732e5c77b_tournament_registrations')
+        .select('id')
+        .eq('tournament_id', tournament.id)
+        .eq('athlete_id', athlete.id)
+        .single()
+
+      if (!registration) {
+        const { data: newRegistration, error: createError } = await supabase
+          .from('app_5732e5c77b_tournament_registrations')
+          .insert({ tournament_id: tournament.id, athlete_id: athlete.id, status: 'registered' })
+          .select('id')
+          .single()
+        if (createError) throw createError
+        registration = newRegistration
+      }
+
+      // 2. Adicionar a categoria a essa inscrição
+      const { error: catError } = await supabase
+        .from('app_5732e5c77b_registration_categories')
+        .insert({
+          registration_id: registration.id,
+          category_id: categoryId,
+          price_paid: category?.price || 0 // Pega o preço da categoria
+        })
+      if (catError) throw catError
+
+      setMessage(`${athlete.name} inscrito com sucesso em ${category?.name}!`)
+      await loadRegistrations() // Recarrega a lista para atualizar a UI
+
+    } catch (err: any) {
+      console.error('Error registering athlete:', err)
+      setError(err.message || 'Erro ao inscrever atleta.')
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
-  const handleUnregisterAthlete = (registration: Registration) => {
-    const confirmed = window.confirm(
-      `Tem certeza que deseja remover ${registration.athleteName} da categoria ${registration.category}?`
-    )
-    
+  // <<< 6. Função reescrita para deletar do Supabase
+  const handleUnregisterAthlete = async (registration: Registration) => {
+    const confirmed = window.confirm(`Remover ${registration.athlete_name} da categoria ${registration.category_name}?`)
     if (confirmed) {
-      const updatedRegistrations = registrations.filter(reg => reg.id !== registration.id)
-      setRegistrations(updatedRegistrations)
-      saveRegistrations(updatedRegistrations)
-      setMessage(`${registration.athleteName} removido da categoria ${registration.category}`)
+      setIsSubmitting(true)
+      try {
+        const { error } = await supabase
+          .from('app_5732e5c77b_registration_categories')
+          .delete()
+          .eq('id', registration.id) // Deleta pelo ID único da relação
+        
+        if (error) throw error
+
+        setMessage(`${registration.athlete_name} removido com sucesso.`)
+        await loadRegistrations() // Recarrega para atualizar a UI
+      } catch (err: any) {
+        setError(err.message || 'Erro ao remover inscrição.')
+      } finally {
+        setIsSubmitting(false)
+      }
     }
   }
 
-  const getLevelText = (level: PlayingLevel): string => {
-    switch (level) {
-      case PlayingLevel.BEGINNER: return 'Iniciante'
-      case PlayingLevel.INTERMEDIATE: return 'Intermediário'
-      case PlayingLevel.ADVANCED: return 'Avançado'
-      case PlayingLevel.PROFESSIONAL: return 'Profissional'
-      default: return level
+  const getLevelText = (level: string): string => {
+    const levels: { [key: string]: string } = {
+      beginner: 'Iniciante',
+      intermediate: 'Intermediário',
+      advanced: 'Avançado',
+      professional: 'Profissional'
     }
+    return levels[level] || level
   }
+  
+  // ... (getLevelBadgeColor pode ser mantida como está)
 
-  const getLevelBadgeColor = (level: PlayingLevel): string => {
-    switch (level) {
-      case PlayingLevel.BEGINNER: return 'bg-gray-100 text-gray-800'
-      case PlayingLevel.INTERMEDIATE: return 'bg-blue-100 text-blue-800'
-      case PlayingLevel.ADVANCED: return 'bg-green-100 text-green-800'
-      case PlayingLevel.PROFESSIONAL: return 'bg-purple-100 text-purple-800'
-      default: return 'bg-gray-100 text-gray-800'
-    }
-  }
+  const selectedCategory = tournament.categories?.find(c => c.id === selectedCategoryId)
 
-  // Filter athletes based on selected category, search term, and level filter
   const eligibleAthletes = athletes.filter(athlete => {
-    if (selectedCategory && !validateAthleteForCategory(athlete, selectedCategory)) return false
+    if (!selectedCategoryId) return false;
+    if (!validateAthleteForCategory(athlete, selectedCategory)) return false
     if (searchTerm && !athlete.name.toLowerCase().includes(searchTerm.toLowerCase())) return false
-    if (filterLevel !== 'all' && athlete.playingLevel !== filterLevel) return false
+    if (filterLevel !== 'all' && athlete.playing_level !== filterLevel) return false
     return true
   })
 
-  // Get registrations for selected category
-  const categoryRegistrations = selectedCategory 
-    ? registrations.filter(reg => reg.category === selectedCategory)
-    : []
+  const categoryRegistrations = registrations.filter(reg => reg.category_id === selectedCategoryId)
+  
+  if (isLoading) {
+    return <div>Carregando gerenciador de inscrições...</div>
+  }
 
   return (
     <div className="space-y-6">
@@ -263,66 +309,43 @@ export function RegistrationManager({ tournament, onClose, onUpdate }: Registrat
 
       {/* Messages */}
       {message && (
-        <Alert className="border-green-200 bg-green-50">
+        <Alert className="border-green-200 bg-green-50" onClick={() => setMessage('')}>
           <CheckCircle className="h-4 w-4 text-green-600" />
           <AlertDescription className="text-green-800">{message}</AlertDescription>
         </Alert>
       )}
 
       {error && (
-        <Alert variant="destructive">
+        <Alert variant="destructive" onClick={() => setError('')}>
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
-
+      
       {/* Statistics */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card>
           <CardContent className="p-4">
-            <div className="flex items-center space-x-2">
-              <Users className="h-4 w-4 text-blue-500" />
-              <div>
-                <p className="text-sm font-medium">Atletas Disponíveis</p>
-                <p className="text-2xl font-bold">{athletes.length}</p>
-              </div>
-            </div>
+            <p className="text-sm font-medium text-muted-foreground">Atletas na Base</p>
+            <p className="text-2xl font-bold">{athletes.length}</p>
           </CardContent>
         </Card>
-        
         <Card>
           <CardContent className="p-4">
-            <div className="flex items-center space-x-2">
-              <UserPlus className="h-4 w-4 text-green-500" />
-              <div>
-                <p className="text-sm font-medium">Total Inscritos</p>
-                <p className="text-2xl font-bold">{registrations.length}</p>
-              </div>
-            </div>
+            <p className="text-sm font-medium text-muted-foreground">Inscrições Totais</p>
+            <p className="text-2xl font-bold">{registrations.length}</p>
           </CardContent>
         </Card>
-        
         <Card>
           <CardContent className="p-4">
-            <div className="flex items-center space-x-2">
-              <Users className="h-4 w-4 text-orange-500" />
-              <div>
-                <p className="text-sm font-medium">Vagas Restantes</p>
-                <p className="text-2xl font-bold">{tournament.maxParticipants - registrations.length}</p>
-              </div>
-            </div>
+            <p className="text-sm font-medium text-muted-foreground">Vagas Restantes</p>
+            <p className="text-2xl font-bold">{Math.max(0, tournament.maxParticipants - registrations.length)}</p>
           </CardContent>
         </Card>
-        
         <Card>
           <CardContent className="p-4">
-            <div className="flex items-center space-x-2">
-              <Filter className="h-4 w-4 text-purple-500" />
-              <div>
-                <p className="text-sm font-medium">Categorias</p>
-                <p className="text-2xl font-bold">{tournament.categories?.length || 0}</p>
-              </div>
-            </div>
+            <p className="text-sm font-medium text-muted-foreground">Categorias</p>
+            <p className="text-2xl font-bold">{tournament.categories?.length || 0}</p>
           </CardContent>
         </Card>
       </div>
@@ -330,20 +353,18 @@ export function RegistrationManager({ tournament, onClose, onUpdate }: Registrat
       {/* Category Selection */}
       <Card>
         <CardHeader>
-          <CardTitle>Selecionar Categoria</CardTitle>
-          <CardDescription>
-            Escolha uma categoria para ver os atletas elegíveis
-          </CardDescription>
+          <CardTitle>1. Selecionar Categoria</CardTitle>
+          <CardDescription>Escolha uma categoria para ver os atletas elegíveis e gerenciar inscrições.</CardDescription>
         </CardHeader>
         <CardContent>
-          <Select value={selectedCategory} onValueChange={setSelectedCategory}>
+          <Select value={selectedCategoryId} onValueChange={setSelectedCategoryId}>
             <SelectTrigger>
-              <SelectValue placeholder="Escolha uma categoria" />
+              <SelectValue placeholder="Escolha uma categoria..." />
             </SelectTrigger>
             <SelectContent>
               {tournament.categories?.map(category => (
-                <SelectItem key={category} value={category}>
-                  {category}
+                <SelectItem key={category.id} value={category.id}>
+                  {category.name}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -352,154 +373,94 @@ export function RegistrationManager({ tournament, onClose, onUpdate }: Registrat
       </Card>
 
       {/* Athletes Management */}
-      {selectedCategory && (
+      {selectedCategoryId && (
         <>
-          {/* Filters */}
+          {/* Filters and Eligible Athletes */}
           <Card>
             <CardHeader>
-              <CardTitle>Filtros</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="search">Buscar Atleta</Label>
-                  <div className="relative">
-                    <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      id="search"
-                      placeholder="Digite o nome do atleta..."
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      className="pl-8"
-                    />
-                  </div>
-                </div>
-                
-                <div className="space-y-2">
-                  <Label htmlFor="levelFilter">Filtrar por Nível</Label>
-                  <Select value={filterLevel} onValueChange={setFilterLevel}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Todos os níveis" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Todos os níveis</SelectItem>
-                      <SelectItem value={PlayingLevel.BEGINNER}>Iniciante</SelectItem>
-                      <SelectItem value={PlayingLevel.INTERMEDIATE}>Intermediário</SelectItem>
-                      <SelectItem value={PlayingLevel.ADVANCED}>Avançado</SelectItem>
-                      <SelectItem value={PlayingLevel.PROFESSIONAL}>Profissional</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Eligible Athletes */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Atletas Elegíveis - {selectedCategory}</CardTitle>
+              <CardTitle>2. Inscrever Atletas Elegíveis</CardTitle>
               <CardDescription>
-                {eligibleAthletes.length} atletas podem se inscrever nesta categoria
+                Filtre e inscreva atletas que cumprem os requisitos para: <span className="font-bold">{selectedCategory?.name}</span>
               </CardDescription>
             </CardHeader>
-            <CardContent>
-              <div className="space-y-3 max-h-96 overflow-y-auto">
+            <CardContent className="space-y-4">
+              {/* Filter Inputs */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Input
+                  placeholder="Buscar atleta por nome..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-8"
+                />
+                <Select value={filterLevel} onValueChange={setFilterLevel}>
+                  <SelectTrigger><SelectValue/></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos os níveis</SelectItem>
+                    <SelectItem value="beginner">Iniciante</SelectItem>
+                    <SelectItem value="intermediate">Intermediário</SelectItem>
+                    <SelectItem value="advanced">Avançado</SelectItem>
+                    <SelectItem value="professional">Profissional</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Eligible Athletes List */}
+              <div className="space-y-3 max-h-96 overflow-y-auto border rounded-lg p-2">
                 {eligibleAthletes.length === 0 ? (
-                  <div className="text-center py-8">
-                    <Users className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-                    <h3 className="text-lg font-medium mb-2">Nenhum atleta elegível</h3>
-                    <p className="text-muted-foreground">
-                      {athletes.length === 0 
-                        ? 'Gere atletas de teste primeiro na aba "Gerar Atletas"'
-                        : 'Nenhum atleta atende aos critérios desta categoria'
-                      }
-                    </p>
+                  <div className="text-center py-8 text-muted-foreground">
+                    <p>Nenhum atleta elegível encontrado com os filtros atuais.</p>
                   </div>
                 ) : (
-                  eligibleAthletes.map(athlete => (
-                    <div key={athlete.id} className="flex items-center justify-between p-4 border rounded-lg">
-                      <div className="flex-1">
-                        <div className="flex items-center space-x-2 mb-1">
+                  eligibleAthletes.map(athlete => {
+                    const isRegistered = isAthleteRegistered(athlete.id, selectedCategoryId);
+                    return (
+                      <div key={athlete.id} className="flex items-center justify-between p-3 border rounded-lg">
+                        <div>
                           <h4 className="font-medium">{athlete.name}</h4>
-                          <Badge className={getLevelBadgeColor(athlete.playingLevel)}>
-                            {getLevelText(athlete.playingLevel)}
-                          </Badge>
-                        </div>
-                        <div className="flex items-center space-x-4 text-sm text-muted-foreground">
-                          <span className="flex items-center space-x-1">
-                            <Star className="h-3 w-3 text-yellow-500" />
-                            <span>Rating: {athlete.currentRating}</span>
-                          </span>
-                          <span className="flex items-center space-x-1">
-                            <MapPin className="h-3 w-3" />
+                          <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                            <span>Rating: {athlete.current_rating}</span>
                             <span>{athlete.city}</span>
-                          </span>
-                          <span className="flex items-center space-x-1">
-                            <Calendar className="h-3 w-3" />
                             <span>{athlete.age} anos</span>
-                          </span>
-                          <span>{athlete.wins}V-{athlete.losses}D</span>
+                          </div>
                         </div>
+                        <Button 
+                          size="sm"
+                          onClick={() => handleRegisterAthlete(athlete, selectedCategoryId)}
+                          disabled={isRegistered || isSubmitting}
+                          variant={isRegistered ? "secondary" : "default"}
+                        >
+                          {isRegistered ? 'Inscrito' : (isSubmitting ? 'Inscrevendo...' : 'Inscrever')}
+                        </Button>
                       </div>
-                      <Button 
-                        size="sm"
-                        onClick={() => handleRegisterAthlete(athlete, selectedCategory)}
-                        disabled={isAthleteRegistered(athlete.id, selectedCategory)}
-                        variant={isAthleteRegistered(athlete.id, selectedCategory) ? "secondary" : "default"}
-                      >
-                        {isAthleteRegistered(athlete.id, selectedCategory) ? (
-                          <>
-                            <CheckCircle className="h-4 w-4 mr-1" />
-                            Inscrito
-                          </>
-                        ) : (
-                          <>
-                            <UserPlus className="h-4 w-4 mr-1" />
-                            Inscrever
-                          </>
-                        )}
-                      </Button>
-                    </div>
-                  ))
+                    )
+                  })
                 )}
               </div>
             </CardContent>
           </Card>
-
-          {/* Category Registrations */}
+          
+          {/* Category Registrations List */}
           {categoryRegistrations.length > 0 && (
             <Card>
               <CardHeader>
-                <CardTitle>Inscritos na Categoria - {selectedCategory}</CardTitle>
-                <CardDescription>
-                  {categoryRegistrations.length} atletas inscritos
-                </CardDescription>
+                <CardTitle>3. Inscritos em {selectedCategory?.name}</CardTitle>
+                <CardDescription>{categoryRegistrations.length} atleta(s) nesta categoria.</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="space-y-2">
                   {categoryRegistrations.map(registration => (
                     <div key={registration.id} className="flex items-center justify-between p-3 border rounded">
                       <div>
-                        <h4 className="font-medium">{registration.athleteName}</h4>
-                        <div className="flex items-center space-x-4 text-sm text-muted-foreground">
-                          <span className="flex items-center space-x-1">
-                            <Star className="h-3 w-3 text-yellow-500" />
-                            <span>Rating: {registration.athleteRating}</span>
-                          </span>
-                          <span className="flex items-center space-x-1">
-                            <MapPin className="h-3 w-3" />
-                            <span>{registration.athleteCity}</span>
-                          </span>
-                          <span>Nível: {registration.athleteLevel}</span>
-                        </div>
+                        <h4 className="font-medium">{registration.athlete_name}</h4>
+                        <span className="text-sm text-muted-foreground">Rating: {registration.athlete_rating}</span>
                       </div>
                       <Button 
                         size="sm" 
                         variant="destructive"
                         onClick={() => handleUnregisterAthlete(registration)}
+                        disabled={isSubmitting}
                       >
-                        <UserMinus className="h-4 w-4 mr-1" />
-                        Remover
+                        {isSubmitting ? 'Removendo...' : 'Remover'}
                       </Button>
                     </div>
                   ))}
@@ -508,44 +469,6 @@ export function RegistrationManager({ tournament, onClose, onUpdate }: Registrat
             </Card>
           )}
         </>
-      )}
-
-      {/* All Registrations Summary */}
-      {registrations.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Resumo de Todas as Inscrições</CardTitle>
-            <CardDescription>
-              {registrations.length} de {tournament.maxParticipants} vagas preenchidas
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {/* Group registrations by category */}
-              {tournament.categories?.map(category => {
-                const categoryRegs = registrations.filter(reg => reg.category === category)
-                if (categoryRegs.length === 0) return null
-                
-                return (
-                  <div key={category} className="space-y-2">
-                    <div className="flex items-center space-x-2">
-                      <h4 className="font-medium">{category}</h4>
-                      <Badge variant="outline">{categoryRegs.length} inscritos</Badge>
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 ml-4">
-                      {categoryRegs.map(reg => (
-                        <div key={reg.id} className="text-sm p-2 border rounded">
-                          <div className="font-medium">{reg.athleteName}</div>
-                          <div className="text-muted-foreground">Rating: {reg.athleteRating}</div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          </CardContent>
-        </Card>
       )}
     </div>
   )

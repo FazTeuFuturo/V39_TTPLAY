@@ -3,9 +3,9 @@ import { UserType } from './types'
 export interface StoredUser {
   id: string
   email: string
-  password: string
   userType: UserType
   name: string
+  password?: string
   // Athlete specific fields
   phone?: string
   cpf?: string
@@ -20,6 +20,8 @@ export interface StoredUser {
   gamesPlayed?: number
   wins?: number
   losses?: number
+  avatarUrl?: string
+  gender: string  
   // Club specific fields
   cnpj?: string
   corporateEmail?: string

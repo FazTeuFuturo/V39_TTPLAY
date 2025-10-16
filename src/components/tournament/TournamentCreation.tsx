@@ -10,8 +10,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Checkbox } from '@/components/ui/checkbox'
 import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Calendar, MapPin, Users, Trophy, CheckCircle, AlertCircle, X } from 'lucide-react'
-import { TournamentStatus } from '@/lib/types'
+import { Calendar, DollarSign, Trophy, CheckCircle, AlertCircle, X, Percent } from 'lucide-react'
+import { supabase } from '@/lib/supabase'
 
 interface TournamentCreationProps {
   onTournamentCreated: (tournament: any) => void
@@ -24,6 +24,16 @@ interface Category {
   name: string
   type: string
   gender: string
+  age_min?: number
+  age_max?: number
+  rating_min?: number
+  rating_max?: number
+  is_official: boolean
+}
+
+interface CategoryPrice {
+  categoryId: string
+  price: number
 }
 
 export function TournamentCreation({ onTournamentCreated, createdBy, editTournament }: TournamentCreationProps) {
@@ -34,98 +44,157 @@ export function TournamentCreation({ onTournamentCreated, createdBy, editTournam
     endDate: editTournament?.endDate ? new Date(editTournament.endDate).toISOString().split('T')[0] : '',
     registrationDeadline: editTournament?.registrationDeadline ? new Date(editTournament.registrationDeadline).toISOString().split('T')[0] : '',
     location: editTournament?.location || '',
-    maxParticipants: editTournament?.maxParticipants?.toString() || '',
-    registrationPrice: editTournament?.registrationPrice?.toString() || '',
+    maxParticipants: editTournament?.maxParticipants?.toString() || '32',
     format: editTournament?.format || 'groups_elimination',
     rules: editTournament?.rules || '',
-    prizes: editTournament?.prizes || ''
+    prizes: editTournament?.prizes || '',
+    discountTwoCategories: editTournament?.discount_two_categories?.toString() || '0',
+    discountThreeOrMore: editTournament?.discount_three_or_more?.toString() || '0'
   })
 
-  // Simplified ABSOLUTO categories - all displayed at once
-  const allCategories = [
-    // Categorias por Idade - Masculino
-    'Sub-7 Masculino', 'Sub-9 Masculino', 'Sub-11 Masculino', 'Sub-13 Masculino', 
-    'Sub-15 Masculino', 'Sub-19 Masculino', 'Sub-21 Masculino', 'Adulto Masculino',
-    'Veterano 40+ Masculino', 'Veterano 50+ Masculino', 'Veterano 60+ Masculino', 
-    'Veterano 70+ Masculino', 'Veterano 75+ Masculino',
-    
-    // Categorias por Idade - Feminino
-    'Sub-7 Feminino', 'Sub-9 Feminino', 'Sub-11 Feminino', 'Sub-13 Feminino',
-    'Sub-15 Feminino', 'Sub-19 Feminino', 'Sub-21 Feminino', 'Adulto Feminino',
-    'Veterano 40+ Feminino', 'Veterano 50+ Feminino', 'Veterano 60+ Feminino',
-    'Veterano 70+ Feminino', 'Veterano 75+ Feminino',
-    
-    // Categorias ABSOLUTO por Rating
-    'Absoluto A Masculino', 'Absoluto B Masculino', 'Absoluto C Masculino',
-    'Absoluto D Masculino', 'Absoluto E Masculino', 'Absoluto F Masculino',
-    'Absoluto A Feminino', 'Absoluto B Feminino', 'Absoluto C Feminino',
-    'Absoluto D Feminino', 'Absoluto E Feminino', 'Absoluto F Feminino',
-    
-    // Categorias Especiais
-    'Iniciantes Masculino', 'Iniciantes Feminino',
-    'Duplas Masculinas', 'Duplas Femininas', 'Duplas Mistas'
-  ]
-
   const [categories, setCategories] = useState<Category[]>([])
-  const [selectedCategories, setSelectedCategories] = useState<string[]>(editTournament?.categories || [])
-  const [customCategory, setCustomCategory] = useState('')
+  const [selectedCategories, setSelectedCategories] = useState<CategoryPrice[]>([])
   const [isLoading, setIsLoading] = useState(false)
+  const [isLoadingCategories, setIsLoadingCategories] = useState(true)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+  const [customCategory, setCustomCategory] = useState({
+  name: '',
+  gender: 'male' as 'male' | 'female' | 'mixed',
+  ageMin: '',
+  ageMax: '',
+  ratingMin: '',
+  ratingMax: ''
+})
+
+const handleCreateCustomCategory = async () => {
+  try {
+    if (!customCategory.name.trim()) {
+      setError('Nome da categoria é obrigatório')
+      return
+    }
+
+    const { data, error } = await supabase
+      .from('app_5732e5c77b_categories')
+      .insert([{
+        name: customCategory.name,
+        type: 'custom',
+        gender: customCategory.gender,
+        age_min: customCategory.ageMin ? parseInt(customCategory.ageMin) : null,
+        age_max: customCategory.ageMax ? parseInt(customCategory.ageMax) : null,
+        rating_min: customCategory.ratingMin ? parseInt(customCategory.ratingMin) : null,
+        rating_max: customCategory.ratingMax ? parseInt(customCategory.ratingMax) : null,
+        is_official: false,
+        club_id: createdBy
+      }])
+      .select()
+      .single()
+
+    if (error) throw error
+
+    setCategories(prev => [...prev, data])
+    
+    setCustomCategory({
+      name: '',
+      gender: 'male',
+      ageMin: '',
+      ageMax: '',
+      ratingMin: '',
+      ratingMax: ''
+    })
+
+    setSuccess('Categoria personalizada criada!')
+    setTimeout(() => setSuccess(''), 3000)
+  } catch (err: any) {
+    setError('Erro ao criar categoria personalizada')
+  }
+}
 
   useEffect(() => {
-    // Initialize categories with ABSOLUTO categories
-    const initialCategories: Category[] = allCategories.map((name, index) => ({
-      id: `absoluto_${index}`,
-      name,
-      type: 'absoluto',
-      gender: name.includes('Masculino') ? 'male' : name.includes('Feminino') ? 'female' : 'mixed'
-    }))
-    
-    setCategories(initialCategories)
+    loadCategories()
   }, [])
+
+  const loadCategories = async () => {
+  try {
+    setIsLoadingCategories(true)
+    
+    // Buscar categorias oficiais + categorias do clube
+    const { data, error } = await supabase
+      .from('app_5732e5c77b_categories')
+      .select('*')
+      .or(`is_official.eq.true,club_id.eq.${createdBy}`)
+      .order('is_official', { ascending: false })
+      .order('name')
+
+    if (error) throw error
+
+    setCategories(data || [])
+  } catch (err: any) {
+    console.error('Error loading categories:', err)
+    setError('Erro ao carregar categorias')
+  } finally {
+    setIsLoadingCategories(false)
+  }
+}
 
   const handleInputChange = (field: string, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }))
     setError('')
   }
 
-  const handleCategoryToggle = (category: string) => {
+  const handleCategoryToggle = (categoryId: string) => {
     setSelectedCategories(prev => {
-      if (prev.includes(category)) {
-        return prev.filter(c => c !== category)
+      const exists = prev.find(c => c.categoryId === categoryId)
+      
+      if (exists) {
+        return prev.filter(c => c.categoryId !== categoryId)
       } else {
-        return [...prev, category]
+        return [...prev, { categoryId, price: 50 }]
       }
     })
   }
 
-  const removeCategorySelection = (category: string) => {
-    setSelectedCategories(prev => prev.filter(c => c !== category))
+  const handlePriceChange = (categoryId: string, price: string) => {
+    const numPrice = parseFloat(price) || 0
+    
+    setSelectedCategories(prev => 
+      prev.map(c => 
+        c.categoryId === categoryId 
+          ? { ...c, price: numPrice }
+          : c
+      )
+    )
   }
 
-  const handleAddCustomCategory = () => {
-    if (customCategory.trim()) {
-      const newCategory: Category = {
-        id: `custom_${Date.now()}`,
-        name: customCategory.trim(),
-        type: 'custom',
-        gender: 'mixed'
-      }
-      
-      setCategories(prev => [...prev, newCategory])
-      setSelectedCategories(prev => [...prev, newCategory.name])
-      setCustomCategory('')
+  const removeCategorySelection = (categoryId: string) => {
+    setSelectedCategories(prev => prev.filter(c => c.categoryId !== categoryId))
+  }
+
+  const getCategoryById = (id: string) => {
+    return categories.find(c => c.id === id)
+  }
+
+  const calculateTotalExample = () => {
+    if (selectedCategories.length === 0) return 0
+    
+    const sum = selectedCategories.reduce((acc, c) => acc + c.price, 0)
+    
+    if (selectedCategories.length === 2) {
+      return sum - parseFloat(formData.discountTwoCategories || '0')
+    } else if (selectedCategories.length >= 3) {
+      return sum - parseFloat(formData.discountThreeOrMore || '0')
     }
+    
+    return sum
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsLoading(true)
     setError('')
+    setSuccess('')
 
     try {
-      // Validate required fields
       if (!formData.name.trim()) {
         setError('Nome do torneio é obrigatório')
         return
@@ -146,55 +215,163 @@ export function TournamentCreation({ onTournamentCreated, createdBy, editTournam
         return
       }
 
-      const tournamentData = {
-        id: editTournament?.id || `tournament_${Date.now()}`,
-        name: formData.name,
-        description: formData.description,
-        startDate: new Date(formData.startDate),
-        endDate: new Date(formData.endDate || formData.startDate),
-        registrationDeadline: new Date(formData.registrationDeadline || formData.startDate),
-        location: formData.location,
-        maxParticipants: parseInt(formData.maxParticipants) || 32,
-        registrationPrice: parseFloat(formData.registrationPrice) || 0,
-        format: formData.format,
-        categories: selectedCategories,
-        rules: formData.rules || 'Regras oficiais CBTM',
-        prizes: formData.prizes || 'Medalhas para os 3 primeiros colocados',
-        createdBy,
-        status: editTournament?.status || TournamentStatus.OPEN // FIXED: Use OPEN instead of 'open'
+      // Prepare dates
+      const startDate = new Date(formData.startDate)
+      startDate.setHours(9, 0, 0, 0)
+      
+      const endDate = formData.endDate 
+        ? new Date(formData.endDate)
+        : new Date(formData.startDate)
+      endDate.setHours(18, 0, 0, 0)
+      
+      const registrationDeadline = formData.registrationDeadline
+        ? new Date(formData.registrationDeadline)
+        : new Date(startDate.getTime() - 7 * 24 * 60 * 60 * 1000)
+      registrationDeadline.setHours(23, 59, 59, 999)
+
+      if (editTournament) {
+        // UPDATE EXISTING TOURNAMENT
+        const { data: tournament, error: updateError } = await supabase
+          .from('app_5732e5c77b_tournaments')
+          .update({
+            name: formData.name,
+            description: formData.description || null,
+            start_date: startDate.toISOString(),
+            end_date: endDate.toISOString(),
+            registration_deadline: registrationDeadline.toISOString(),
+            location: formData.location,
+            max_participants: parseInt(formData.maxParticipants) || 32,
+            format: formData.format,
+            rules: formData.rules || 'Regras oficiais CBTM',
+            prizes: formData.prizes || 'Medalhas para os 3 primeiros colocados',
+            discount_two_categories: parseFloat(formData.discountTwoCategories) || 0,
+            discount_three_or_more: parseFloat(formData.discountThreeOrMore) || 0,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', editTournament.id)
+          .select()
+          .single()
+
+        if (updateError) throw updateError
+
+        // Delete existing categories
+        await supabase
+          .from('app_5732e5c77b_tournament_categories')
+          .delete()
+          .eq('tournament_id', editTournament.id)
+
+        // Insert new categories with prices
+        const tournamentCategories = selectedCategories.map(sc => ({
+          tournament_id: editTournament.id,
+          category_id: sc.categoryId,
+          price: sc.price
+        }))
+
+        const { error: catError } = await supabase
+          .from('app_5732e5c77b_tournament_categories')
+          .insert(tournamentCategories)
+
+        if (catError) throw catError
+
+        setSuccess('Torneio atualizado com sucesso!')
+        
+        setTimeout(() => {
+          onTournamentCreated(tournament)
+        }, 1500)
+
+      } else {
+        // CREATE NEW TOURNAMENT
+        const { data: tournament, error: createError } = await supabase
+          .from('app_5732e5c77b_tournaments')
+          .insert([{
+            name: formData.name,
+            description: formData.description || null,
+            start_date: startDate.toISOString(),
+            end_date: endDate.toISOString(),
+            registration_deadline: registrationDeadline.toISOString(),
+            location: formData.location,
+            max_participants: parseInt(formData.maxParticipants) || 32,
+            format: formData.format,
+            rules: formData.rules || 'Regras oficiais CBTM',
+            prizes: formData.prizes || 'Medalhas para os 3 primeiros colocados',
+            discount_two_categories: parseFloat(formData.discountTwoCategories) || 0,
+            discount_three_or_more: parseFloat(formData.discountThreeOrMore) || 0,
+            created_by: createdBy,
+            status: 'open',
+            tournament_type: 'individual'
+          }])
+          .select()
+          .single()
+
+        if (createError) throw createError
+
+        // Insert categories with prices
+        const tournamentCategories = selectedCategories.map(sc => ({
+          tournament_id: tournament.id,
+          category_id: sc.categoryId,
+          price: sc.price
+        }))
+
+        const { error: catError } = await supabase
+          .from('app_5732e5c77b_tournament_categories')
+          .insert(tournamentCategories)
+
+        if (catError) throw catError
+
+        // Update club's tournament count
+        const { data: club } = await supabase
+          .from('app_5732e5c77b_clubs')
+          .select('tournaments_created, active_tournaments')
+          .eq('id', createdBy)
+          .single()
+
+        if (club) {
+          await supabase
+            .from('app_5732e5c77b_clubs')
+            .update({
+              tournaments_created: (club.tournaments_created || 0) + 1,
+              active_tournaments: (club.active_tournaments || 0) + 1
+            })
+            .eq('id', createdBy)
+        }
+
+        setSuccess('Torneio criado com sucesso!')
+        
+        setTimeout(() => {
+          onTournamentCreated(tournament)
+        }, 1500)
       }
 
-      console.log('🔵 CREATING/UPDATING TOURNAMENT:', tournamentData)
-
-      setSuccess(editTournament ? 'Torneio atualizado com sucesso!' : 'Torneio criado com sucesso!')
-      
-      setTimeout(() => {
-        onTournamentCreated(tournamentData)
-      }, 1500)
-
     } catch (err: any) {
-      console.error('🔴 ERROR CREATING TOURNAMENT:', err)
-      setError('Erro ao criar torneio. Tente novamente.')
+      console.error('Error saving tournament:', err)
+      setError(err.message || 'Erro ao salvar torneio. Tente novamente.')
     } finally {
       setIsLoading(false)
     }
   }
 
-  const getCategoryColor = (category: string) => {
-    if (category.includes('Masculino')) return 'bg-blue-100 text-blue-800'
-    if (category.includes('Feminino')) return 'bg-pink-100 text-pink-800'
-    if (category.includes('Mistas')) return 'bg-purple-100 text-purple-800'
-    return 'bg-orange-100 text-orange-800' // Custom categories
+  const getCategoryColor = (gender: string) => {
+    if (gender === 'male') return 'bg-blue-50 border-blue-200'
+    if (gender === 'female') return 'bg-pink-50 border-pink-200'
+    return 'bg-purple-50 border-purple-200'
+  }
+
+  const getCategoryBadgeColor = (gender: string) => {
+    if (gender === 'male') return 'bg-blue-100 text-blue-800'
+    if (gender === 'female') return 'bg-pink-100 text-pink-800'
+    return 'bg-purple-100 text-purple-800'
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 max-w-7xl mx-auto">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold">
+          <h2 className="text-3xl font-bold">
             {editTournament ? 'Editar Torneio' : 'Criar Novo Torneio'}
           </h2>
-          <p className="text-gray-600">Configure seu torneio com categorias ABSOLUTO</p>
+          <p className="text-muted-foreground mt-1">
+            Configure as categorias e preços do seu torneio
+          </p>
         </div>
       </div>
 
@@ -212,9 +389,9 @@ export function TournamentCreation({ onTournamentCreated, createdBy, editTournam
         </Alert>
       )}
 
-      <form onSubmit={handleSubmit} className="space-y-6">
+      <div className="space-y-6">
+        {/* Basic Info */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Basic Information */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -230,7 +407,6 @@ export function TournamentCreation({ onTournamentCreated, createdBy, editTournam
                   value={formData.name}
                   onChange={(e) => handleInputChange('name', e.target.value)}
                   placeholder="Ex: Campeonato Regional 2024"
-                  required
                 />
               </div>
 
@@ -252,40 +428,23 @@ export function TournamentCreation({ onTournamentCreated, createdBy, editTournam
                   value={formData.location}
                   onChange={(e) => handleInputChange('location', e.target.value)}
                   placeholder="Ex: Centro Esportivo Municipal"
-                  required
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-2">
-                  <Label htmlFor="maxParticipants">Máx. Participantes</Label>
-                  <Input
-                    id="maxParticipants"
-                    type="number"
-                    value={formData.maxParticipants}
-                    onChange={(e) => handleInputChange('maxParticipants', e.target.value)}
-                    placeholder="32"
-                    min="4"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="registrationPrice">Taxa de Inscrição (R$)</Label>
-                  <Input
-                    id="registrationPrice"
-                    type="number"
-                    step="0.01"
-                    value={formData.registrationPrice}
-                    onChange={(e) => handleInputChange('registrationPrice', e.target.value)}
-                    placeholder="0.00"
-                    min="0"
-                  />
-                </div>
+              <div className="space-y-2">
+                <Label htmlFor="maxParticipants">Máx. Participantes</Label>
+                <Input
+                  id="maxParticipants"
+                  type="number"
+                  value={formData.maxParticipants}
+                  onChange={(e) => handleInputChange('maxParticipants', e.target.value)}
+                  placeholder="32"
+                  min="4"
+                />
               </div>
             </CardContent>
           </Card>
 
-          {/* Dates and Format */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -301,7 +460,6 @@ export function TournamentCreation({ onTournamentCreated, createdBy, editTournam
                   type="date"
                   value={formData.startDate}
                   onChange={(e) => handleInputChange('startDate', e.target.value)}
-                  required
                 />
               </div>
 
@@ -344,126 +502,347 @@ export function TournamentCreation({ onTournamentCreated, createdBy, editTournam
           </Card>
         </div>
 
-        {/* Categories Selection - Simplified */}
+        {/* Categories & Pricing */}
         <Card>
           <CardHeader>
-            <CardTitle>Categorias ABSOLUTO</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              <DollarSign className="h-5 w-5" />
+              Categorias e Preços
+            </CardTitle>
             <CardDescription>
-              Selecione as categorias baseadas nas regras CBTM - Todas as categorias disponíveis
+              Selecione as categorias e defina o preço individual de cada uma
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
-            {/* Selected Categories */}
-            {selectedCategories.length > 0 && (
-              <div className="space-y-2">
-                <Label>Categorias Selecionadas ({selectedCategories.length}):</Label>
-                <div className="flex flex-wrap gap-2">
-                  {selectedCategories.map(category => (
-                    <Badge 
-                      key={category} 
-                      className={`${getCategoryColor(category)} cursor-pointer hover:opacity-80`}
-                      onClick={() => removeCategorySelection(category)}
-                    >
-                      {category}
-                      <X className="h-3 w-3 ml-1" />
-                    </Badge>
-                  ))}
-                </div>
+          <CardContent className="space-y-6">
+            {isLoadingCategories ? (
+              <div className="text-center py-8 text-muted-foreground">
+                Carregando categorias...
               </div>
-            )}
-
-            {/* All Categories Grid */}
-            <div className="space-y-2">
-              <Label>Todas as Categorias ABSOLUTO:</Label>
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 max-h-96 overflow-y-auto border rounded p-3">
-                {allCategories.map(category => (
-                  <div key={category} className="flex items-center space-x-2">
-                    <Checkbox
-                      id={category}
-                      checked={selectedCategories.includes(category)}
-                      onCheckedChange={() => handleCategoryToggle(category)}
-                    />
-                    <Label 
-                      htmlFor={category} 
-                      className="text-sm cursor-pointer hover:text-blue-600"
-                      title={category}
-                    >
-                      {category}
+            ) : (
+              <>
+                {/* Selected Categories with Prices */}
+                {selectedCategories.length > 0 && (
+                  <div className="space-y-3">
+                    <Label className="text-base">
+                      Categorias Selecionadas ({selectedCategories.length})
                     </Label>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {selectedCategories.map(sc => {
+                        const category = getCategoryById(sc.categoryId)
+                        if (!category) return null
+                        
+                        return (
+                          <div 
+                            key={sc.categoryId}
+                            className={`p-3 border-2 rounded-lg ${getCategoryColor(category.gender)}`}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 mb-2">
+                                  <h4 className="font-medium text-sm truncate">
+                                    {category.name}
+                                  </h4>
+                                  <Badge variant="outline" className={`text-xs ${getCategoryBadgeColor(category.gender)}`}>
+                                    {category.type}
+                                  </Badge>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <Label htmlFor={`price-${sc.categoryId}`} className="text-xs text-muted-foreground">
+                                    Preço:
+                                  </Label>
+                                  <div className="relative flex-1">
+                                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
+                                      R$
+                                    </span>
+                                    <Input
+                                      id={`price-${sc.categoryId}`}
+                                      type="number"
+                                      step="0.01"
+                                      min="0"
+                                      value={sc.price}
+                                      onChange={(e) => handlePriceChange(sc.categoryId, e.target.value)}
+                                      className="pl-8 h-8 text-sm"
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => removeCategorySelection(sc.categoryId)}
+                                className="h-8 w-8 p-0 hover:bg-destructive/10"
+                              >
+                                <X className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
                   </div>
-                ))}
-              </div>
-            </div>
+                )}
 
-            {/* Custom Categories Section */}
-            <div className="space-y-3 border-t pt-4">
-              <h4 className="font-medium text-orange-700">Categoria Personalizada</h4>
-              <div className="space-y-2">
-                <Label htmlFor="customCategory">Criar Nova Categoria</Label>
-                <div className="flex space-x-2">
-                  <Input
-                    id="customCategory"
-                    value={customCategory}
-                    onChange={(e) => setCustomCategory(e.target.value)}
-                    placeholder="Ex: Categoria Especial"
-                    onKeyPress={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault()
-                        handleAddCustomCategory()
-                      }
-                    }}
-                  />
-                  <Button 
-                    type="button" 
-                    onClick={handleAddCustomCategory}
-                    disabled={!customCategory.trim()}
-                    variant="outline"
-                  >
-                    + Adicionar
-                  </Button>
-                </div>
-              </div>
-
-              {/* Display custom categories */}
-              {categories.filter(cat => cat.type === 'custom').length > 0 && (
-                <div className="space-y-2">
-                  <Label className="text-sm text-muted-foreground">Categorias Personalizadas:</Label>
-                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
-                    {categories
-                      .filter(cat => cat.type === 'custom')
-                      .map(category => (
-                        <div key={category.id} className="flex items-center space-x-2">
+                {/* Available Categories */}
+                <div className="space-y-3">
+                  <Label className="text-base">Categorias Disponíveis</Label>
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 max-h-96 overflow-y-auto border rounded-lg p-3">
+                    {categories.map(category => {
+                      const isSelected = selectedCategories.some(sc => sc.categoryId === category.id)
+                      
+                      return (
+                        <div 
+                          key={category.id} 
+                          className="flex items-center space-x-2"
+                        >
                           <Checkbox
                             id={category.id}
-                            checked={selectedCategories.includes(category.name)}
-                            onCheckedChange={() => handleCategoryToggle(category.name)}
+                            checked={isSelected}
+                            onCheckedChange={() => handleCategoryToggle(category.id)}
                           />
                           <Label 
                             htmlFor={category.id} 
-                            className="text-sm cursor-pointer hover:text-orange-600"
+                            className="text-sm cursor-pointer hover:text-blue-600 flex-1"
                             title={category.name}
                           >
                             {category.name}
                           </Label>
                         </div>
-                      ))}
+                      )
+                    })}
                   </div>
                 </div>
-              )}
-            </div>
+{/* Separador */}
+<div className="border-t pt-6 mt-6">
+  <div className="space-y-4">
+    <div className="flex items-center justify-between">
+      <div>
+        <Label className="text-base">Categorias Personalizadas do Clube</Label>
+        <p className="text-sm text-muted-foreground">
+          Crie categorias específicas para o seu clube
+        </p>
+      </div>
+    </div>
 
-            {selectedCategories.length === 0 && (
-              <Alert>
-                <AlertCircle className="h-4 w-4" />
-                <AlertDescription>
-                  Selecione pelo menos uma categoria para continuar.
-                </AlertDescription>
-              </Alert>
+    {/* Lista de categorias personalizadas */}
+    {categories.filter(c => !c.is_official).length > 0 && (
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 p-3 border rounded-lg bg-orange-50">
+        {categories
+          .filter(c => !c.is_official)
+          .map(category => {
+            const isSelected = selectedCategories.some(sc => sc.categoryId === category.id)
+            
+            return (
+              <div 
+                key={category.id} 
+                className="flex items-center space-x-2"
+              >
+                <Checkbox
+                  id={`custom-${category.id}`}
+                  checked={isSelected}
+                  onCheckedChange={() => handleCategoryToggle(category.id)}
+                />
+                <Label 
+                  htmlFor={`custom-${category.id}`}
+                  className="text-sm cursor-pointer hover:text-orange-600 flex-1"
+                  title={category.name}
+                >
+                  {category.name}
+                </Label>
+              </div>
+            )
+          })}
+      </div>
+    )}
+
+    {/* Formulário inline para criar categoria */}
+    <div className="space-y-3 p-4 border-2 border-dashed rounded-lg bg-gray-50">
+      <h4 className="font-medium text-sm">➕ Criar Nova Categoria</h4>
+      
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="space-y-2">
+          <Label htmlFor="customName" className="text-xs">Nome da Categoria *</Label>
+          <Input
+            id="customName"
+            value={customCategory.name}
+            onChange={(e) => setCustomCategory(prev => ({ ...prev, name: e.target.value }))}
+            placeholder="Ex: Praticantes"
+            className="h-9"
+          />
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="customGender" className="text-xs">Gênero</Label>
+          <Select 
+            value={customCategory.gender} 
+            onValueChange={(value: 'male' | 'female' | 'mixed') => 
+              setCustomCategory(prev => ({ ...prev, gender: value }))
+            }
+          >
+            <SelectTrigger className="h-9">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="male">Masculino</SelectItem>
+              <SelectItem value="female">Feminino</SelectItem>
+              <SelectItem value="mixed">Misto</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="customAgeMin" className="text-xs">Idade Mínima</Label>
+          <Input
+            id="customAgeMin"
+            type="number"
+            value={customCategory.ageMin}
+            onChange={(e) => setCustomCategory(prev => ({ ...prev, ageMin: e.target.value }))}
+            placeholder="0"
+            className="h-9"
+          />
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="customAgeMax" className="text-xs">Idade Máxima</Label>
+          <Input
+            id="customAgeMax"
+            type="number"
+            value={customCategory.ageMax}
+            onChange={(e) => setCustomCategory(prev => ({ ...prev, ageMax: e.target.value }))}
+            placeholder="999"
+            className="h-9"
+          />
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="customRatingMin" className="text-xs">Rating Mínimo</Label>
+          <Input
+            id="customRatingMin"
+            type="number"
+            value={customCategory.ratingMin}
+            onChange={(e) => setCustomCategory(prev => ({ ...prev, ratingMin: e.target.value }))}
+            placeholder="0"
+            className="h-9"
+          />
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="customRatingMax" className="text-xs">Rating Máximo</Label>
+          <Input
+            id="customRatingMax"
+            type="number"
+            value={customCategory.ratingMax}
+            onChange={(e) => setCustomCategory(prev => ({ ...prev, ratingMax: e.target.value }))}
+            placeholder="9999"
+            className="h-9"
+          />
+        </div>
+      </div>
+
+      <Button
+        type="button"
+        onClick={handleCreateCustomCategory}
+        variant="outline"
+        size="sm"
+        className="w-full"
+      >
+        Criar Categoria Personalizada
+      </Button>
+    </div>
+  </div>
+</div>
+                {selectedCategories.length === 0 && (
+                  <Alert>
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertDescription>
+                      Selecione pelo menos uma categoria para continuar
+                    </AlertDescription>
+                  </Alert>
+                )}
+              </>
             )}
           </CardContent>
         </Card>
 
-        {/* Additional Information */}
+        {/* Discounts */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Percent className="h-5 w-5" />
+              Descontos por Múltiplas Categorias
+            </CardTitle>
+            <CardDescription>
+              Defina descontos quando o atleta se inscrever em mais de uma categoria
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="discountTwo">Desconto para 2 Categorias (R$)</Label>
+                <Input
+                  id="discountTwo"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={formData.discountTwoCategories}
+                  onChange={(e) => handleInputChange('discountTwoCategories', e.target.value)}
+                  placeholder="0.00"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Ex: Se for R$ 10, duas categorias de R$ 40 custariam R$ 70
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="discountThree">Desconto para 3+ Categorias (R$)</Label>
+                <Input
+                  id="discountThree"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={formData.discountThreeOrMore}
+                  onChange={(e) => handleInputChange('discountThreeOrMore', e.target.value)}
+                  placeholder="0.00"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Ex: Se for R$ 20, três categorias de R$ 40 custariam R$ 100
+                </p>
+              </div>
+            </div>
+
+            {selectedCategories.length > 0 && (
+              <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <h4 className="font-medium text-sm mb-2">Exemplo de Cálculo:</h4>
+                <div className="space-y-1 text-sm">
+                  <div className="flex justify-between">
+                    <span>Soma das categorias selecionadas:</span>
+                    <span className="font-medium">
+                      R$ {selectedCategories.reduce((acc, c) => acc + c.price, 0).toFixed(2)}
+                    </span>
+                  </div>
+                  {selectedCategories.length === 2 && parseFloat(formData.discountTwoCategories) > 0 && (
+                    <div className="flex justify-between text-green-700">
+                      <span>Desconto (2 categorias):</span>
+                      <span className="font-medium">- R$ {parseFloat(formData.discountTwoCategories).toFixed(2)}</span>
+                    </div>
+                  )}
+                  {selectedCategories.length >= 3 && parseFloat(formData.discountThreeOrMore) > 0 && (
+                    <div className="flex justify-between text-green-700">
+                      <span>Desconto (3+ categorias):</span>
+                      <span className="font-medium">- R$ {parseFloat(formData.discountThreeOrMore).toFixed(2)}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between pt-2 border-t border-blue-300 font-bold text-blue-900">
+                    <span>Total Final:</span>
+                    <span>R$ {calculateTotalExample().toFixed(2)}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Additional Info */}
         <Card>
           <CardHeader>
             <CardTitle>Informações Adicionais</CardTitle>
@@ -493,13 +872,18 @@ export function TournamentCreation({ onTournamentCreated, createdBy, editTournam
           </CardContent>
         </Card>
 
-        {/* Submit Button */}
-        <div className="flex justify-end space-x-3">
-          <Button type="submit" disabled={isLoading || selectedCategories.length === 0}>
-            {isLoading ? 'Processando...' : (editTournament ? 'Atualizar Torneio' : 'Criar Torneio')}
+        {/* Submit */}
+        <div className="flex justify-end gap-3">
+          <Button 
+            type="button"
+            onClick={handleSubmit}
+            disabled={isLoading || selectedCategories.length === 0}
+            size="lg"
+          >
+            {isLoading ? 'Salvando...' : (editTournament ? 'Atualizar Torneio' : 'Criar Torneio')}
           </Button>
         </div>
-      </form>
+      </div>
     </div>
   )
 }

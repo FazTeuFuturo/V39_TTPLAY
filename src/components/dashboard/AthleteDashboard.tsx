@@ -1,43 +1,95 @@
+// AthleteDashboard.tsx - Bloco de Imports e Funções de Estado
+
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react' // ADICIONADO: useCallback
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog' // ADICIONADO: Dialog
 import { 
-  User, 
-  Trophy, 
-  Target, 
-  Calendar, 
-  Settings, 
-  LogOut,
-  TrendingUp,
-  Award,
-  Users,
-  Clock
+  User, 
+  Trophy, 
+  Target, 
+  Calendar, 
+  Settings, 
+  LogOut,
+  TrendingUp,
+  Award,
+  Users,
+  Clock,
+  X // ADICIONADO: Para fechar o modal
 } from 'lucide-react'
 import { AthleteProfile } from './AthleteProfile'
 import { TournamentList } from '@/components/tournament/TournamentList'
+import { CategoryRegistration } from '@/components/tournament/CategoryRegistration' // ADICIONAR
+import { SupabaseTournaments, SupabaseTournament } from '@/lib/supabase-tournaments' // ADICIONAR
 import type { StoredUser } from '@/lib/auth-storage'
 
 interface AthleteDashboardProps {
-  user: StoredUser
-  onLogout: () => void
+  user: StoredUser
+  onLogout: () => void
 }
 
 export function AthleteDashboard({ user, onLogout }: AthleteDashboardProps) {
-  const [activeTab, setActiveTab] = useState('overview')
+  const [activeTab, setActiveTab] = useState('overview')
+  const [tournamentToRegister, setTournamentToRegister] = useState<SupabaseTournament | null>(null) // NOVO: Estado para o modal
 
-  const getInitials = (name: string) => {
-    return name.split(' ').map(n => n[0]).join('').toUpperCase()
+  const getInitials = (name: string) => {
+    return name.split(' ').map(n => n[0]).join('').toUpperCase()
+  }
+
+  const winRate = user.gamesPlayed ? Math.round((user.wins! / user.gamesPlayed) * 100) : 0
+  
+  // Handler para fechar o modal
+  const handleCloseRegistration = () => {
+      setTournamentToRegister(null)
   }
 
-  const winRate = user.gamesPlayed ? Math.round((user.wins! / user.gamesPlayed) * 100) : 0
+  // Handler NOVO: Busca os detalhes completos do torneio e abre o modal CategoryRegistration
+   const handleOpenRegistration = useCallback(async (tournamentId: string) => {
+      console.log(`🔵 Opening registration for: ${tournamentId}`);
+      
+      const tournament = await SupabaseTournaments.getTournamentById(tournamentId);
 
-  return (
-    <div className="min-h-screen bg-gray-50">
+      if (tournament) {
+          setTournamentToRegister(tournament); // <--- A chave é que aqui o estado é setado
+      } else {
+          alert("Não foi possível carregar os detalhes do torneio. Tente novamente.");
+      }
+  }, [])
+// ... (Seu código de handlers, como handleOpenRegistration e handleCloseRegistration)
+
+// <--- INSERIR O BLOCO DO MODAL AQUI! 
+if (tournamentToRegister) {
+    return (
+        <Dialog 
+  open={!!tournamentToRegister}
+  onOpenChange={(open) => !open && handleCloseRegistration()}
+>
+  <DialogContent className="sm:max-w-xl">
+    {/* Garante que o conteúdo só renderiza quando o torneio estiver carregado */}
+    {tournamentToRegister && (
+      <CategoryRegistration 
+        tournament={tournamentToRegister} 
+        onClose={handleCloseRegistration}
+        athleteUser={user} // <<< ADICIONE ESTA LINHA
+      />
+    )}
+  </DialogContent>
+</Dialog>
+    );
+}
+// FIM DA INSERÇÃO
+
+// INÍCIO DO SEU RETURN PRINCIPAL
+  return (
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <header className="bg-white shadow-sm border-b">
+   <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <header className="bg-white shadow-sm border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -149,23 +201,14 @@ export function AthleteDashboard({ user, onLogout }: AthleteDashboardProps) {
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                      <div>
-                        <p className="font-medium">Torneio Regional SP</p>
-                        <p className="text-sm text-gray-500">15-17 Set 2024</p>
-                      </div>
-                      <Button size="sm">Inscrever-se</Button>
-                    </div>
-                    <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                      <div>
-                        <p className="font-medium">Copa Paulista</p>
-                        <p className="text-sm text-gray-500">22-24 Set 2024</p>
-                      </div>
-                      <Button size="sm">Inscrever-se</Button>
-                    </div>
-                  </div>
-                </CardContent>
+                  <TournamentList 
+                        onCreateTournament={() => {}} 
+                        showCreateButton={false}
+                        userType="athlete"
+                        onRegister={handleOpenRegistration} 
+                        renderMode="simple" // <--- ADICIONE ESTA LINHA
+                    />
+                </CardContent>
               </Card>
 
               <Card>
@@ -234,5 +277,7 @@ export function AthleteDashboard({ user, onLogout }: AthleteDashboardProps) {
         </Tabs>
       </main>
     </div>
-  )
+  </header> 
+ </div> 
+ )
 }

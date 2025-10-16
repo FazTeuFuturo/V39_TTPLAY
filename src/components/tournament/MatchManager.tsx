@@ -33,6 +33,7 @@ export function MatchManager({ tournament, groups, onBack }: MatchManagerProps) 
   const [matches, setMatches] = useState<Match[]>([])
   const [selectedGroup, setSelectedGroup] = useState<string>('')
   const [selectedMatch, setSelectedMatch] = useState<Match | null>(null)
+  const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [isGenerating, setIsGenerating] = useState(false)
@@ -96,7 +97,18 @@ export function MatchManager({ tournament, groups, onBack }: MatchManagerProps) 
     setMatches(updatedMatches)
     saveMatches(tournament.id, updatedMatches)
     setSelectedMatch(null)
+    setIsDialogOpen(false) // ADICIONADO: Fecha o dialog
     setMessage('Resultado salvo com sucesso!')
+  }
+
+  const handleOpenDialog = (match: Match) => {
+    setSelectedMatch(match)
+    setIsDialogOpen(true)
+  }
+
+  const handleCloseDialog = () => {
+    setIsDialogOpen(false)
+    setSelectedMatch(null)
   }
 
   // Get matches for selected group
@@ -284,42 +296,23 @@ export function MatchManager({ tournament, groups, onBack }: MatchManagerProps) 
                               {match.status === 'completed' ? 'Finalizada' :
                                match.status === 'in_progress' ? 'Em andamento' : 'Pendente'}
                             </Badge>
-                            <Dialog>
-                              <DialogTrigger asChild>
-                                <Button 
-                                  size="sm" 
-                                  variant={match.status === 'completed' ? 'outline' : 'default'}
-                                  onClick={() => setSelectedMatch(match)}
-                                >
-                                  {match.status === 'completed' ? (
-                                    <>
-                                      <Edit className="h-3 w-3 mr-1" />
-                                      Editar
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Save className="h-3 w-3 mr-1" />
-                                      Resultado
-                                    </>
-                                  )}
-                                </Button>
-                              </DialogTrigger>
-                              <DialogContent className="max-w-md">
-                                <DialogHeader>
-                                  <DialogTitle>
-                                    {match.status === 'completed' ? 'Editar Resultado' : 'Inserir Resultado'}
-                                  </DialogTitle>
-                                  <DialogDescription>
-                                    {match.player1.name} vs {match.player2.name}
-                                  </DialogDescription>
-                                </DialogHeader>
-                                <MatchResultForm 
-                                  match={match} 
-                                  onSubmit={handleMatchResult}
-                                  existingSets={match.sets}
-                                />
-                              </DialogContent>
-                            </Dialog>
+                            <Button 
+                              size="sm" 
+                              variant={match.status === 'completed' ? 'outline' : 'default'}
+                              onClick={() => handleOpenDialog(match)}
+                            >
+                              {match.status === 'completed' ? (
+                                <>
+                                  <Edit className="h-3 w-3 mr-1" />
+                                  Editar
+                                </>
+                              ) : (
+                                <>
+                                  <Save className="h-3 w-3 mr-1" />
+                                  Resultado
+                                </>
+                              )}
+                            </Button>
                           </div>
                         </div>
                       ))}
@@ -367,6 +360,29 @@ export function MatchManager({ tournament, groups, onBack }: MatchManagerProps) 
           )}
         </div>
       )}
+
+      {/* Dialog controlado */}
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogContent className="max-w-md">
+          {selectedMatch && (
+            <>
+              <DialogHeader>
+                <DialogTitle>
+                  {selectedMatch.status === 'completed' ? 'Editar Resultado' : 'Inserir Resultado'}
+                </DialogTitle>
+                <DialogDescription>
+                  {selectedMatch.player1.name} vs {selectedMatch.player2.name}
+                </DialogDescription>
+              </DialogHeader>
+              <MatchResultForm 
+                match={selectedMatch} 
+                onSubmit={handleMatchResult}
+                existingSets={selectedMatch.sets}
+              />
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
@@ -535,7 +551,7 @@ function MatchResultForm({
         </Alert>
       )}
 
-      <Button type="submit" className="w-full" >
+      <Button type="submit" className="w-full">
         Salvar Resultado
       </Button>
     </form>

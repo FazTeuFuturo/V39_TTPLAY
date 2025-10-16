@@ -56,6 +56,14 @@ export enum ChallengeStatus {
   EXPIRED = 'EXPIRED'
 }
 
+export enum RegistrationStatus { // <--- PRECISA DO 'export'
+  PENDING = 'PENDING',
+  CONFIRMED = 'CONFIRMED',
+  REJECTED = 'REJECTED',
+  CANCELLED = 'CANCELLED',
+  WITHDRAWN = 'WITHDRAWN'
+}
+
 // Base User Interface
 export interface User {
   id: string
@@ -112,25 +120,54 @@ export interface Club {
   updatedAt: Date
 }
 
-// UPDATED: Tournament interface to match component usage
 export interface Tournament {
-  id: string
-  name: string
-  description?: string
-  createdBy: string // Changed from clubId to match component
-  startDate: Date
-  endDate: Date
-  registrationDeadline: Date
-  maxParticipants: number
-  registrationPrice: number // Changed from entryFee to match component
-  format: string // Simplified to string to match component
-  status: TournamentStatus
-  location: string
-  rules?: string
-  prizes?: string
-  categories?: string[] // Added to match component
-  createdAt?: Date
-  updatedAt?: Date
+  id: string
+  name: string
+  description?: string
+  createdBy: string 
+  startDate: Date
+  endDate?: Date // Corrigido para ser opcional
+  registrationDeadline?: Date // Corrigido para ser opcional
+  location: string // Adicionado, pois é usado no frontend
+  rules?: string // Adicionado, pois é usado no frontend
+  prizes?: string // Adicionado, pois é usado no frontend
+  categories?: string[]
+ setRule: number; // <--- ADICIONE ESTA PROPRIEDADE
+ pointsPerSet: number
+ isRanked: boolean // <--- ADICIONE ESTA PROPRIEDADE
+ kFactor: number// Adicionado, pois é usado no frontend
+  
+  // CORREÇÃO CRÍTICA DE PREÇOS E PARTICIPANTES:
+  maxParticipants: number
+ minParticipants?: number
+  // Manter entryFee e registrationPrice separados (conforme seu código anterior)
+  entryFee: number
+  registrationPrice: number 
+  
+  format: TournamentFormat // Assuming TournamentFormat is correctly imported/exported
+  status: TournamentStatus // Assuming TournamentStatus is correctly imported/exported
+  
+  // CORREÇÃO CRÍTICA DO CAMPO QUE ESTAVA CAUSANDO O ERRO:
+  players: PlayerOnTournament[] // <--- AGORA DEFINIDO ACIMA
+  matches: Match[]
+  
+  createdAt?: Date // Corrigido para ser opcional
+  updatedAt?: Date // Corrigido para ser opcional
+  
+  // Adicionar outros campos necessários (ex: clubId)
+  clubId?: string
+  club: any
+  tournamentType?: string; // Adicionado para resolver o TS2339 no TournamentList
+}
+
+export interface PlayerOnTournament { // Necessário para a interface Tournament
+  id: string
+  playerId: string
+  tournamentId: string
+  registrationStatus: RegistrationStatus
+  // Adicionar placeholders para os objetos complexos que você usa:
+  player: User; 
+  registeredAt: Date;
 }
 
 // Match interface

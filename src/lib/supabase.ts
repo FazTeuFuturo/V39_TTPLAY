@@ -84,6 +84,7 @@ export interface DatabaseTournamentRegistration {
 export const getUser = () => supabase.auth.getUser()
 export const getSession = () => supabase.auth.getSession()
 
+
 // Auth functions
 export const signUp = async (email: string, password: string, userData: any) => {
   const { data, error } = await supabase.auth.signUp({

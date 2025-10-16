@@ -21,6 +21,8 @@ export interface SupabaseUser {
   wins?: number
   losses?: number
   clubId?: string
+  avatarUrl?: string
+  gender: string 
   // Club fields
   cnpj?: string
   corporateEmail?: string
@@ -192,6 +194,8 @@ export class SupabaseAuth {
     }
   }
 
+ // Substitua a função inteira no seu arquivo de autenticação
+
   static async getCurrentUser(): Promise<SupabaseUser | null> {
     try {
       const { data: { user: authUser }, error: authError } = await supabase.auth.getUser()
@@ -200,7 +204,7 @@ export class SupabaseAuth {
         return null
       }
 
-      // Get user data from our tables
+      // 1. Busca os dados da tabela 'users' primeiro. Isso nos dá o 'user_type' e a 'avatar_url'.
       const { data: userData, error: userError } = await supabase
         .from('app_5732e5c77b_users')
         .select('*')
@@ -208,12 +212,13 @@ export class SupabaseAuth {
         .single()
 
       if (userError || !userData) {
-        console.error('Error fetching user data:', userError)
+        console.error('Error fetching base user data:', userError)
         return null
       }
 
       let specificData = {}
 
+      // 2. Baseado no 'user_type', busca os dados da tabela específica.
       if (userData.user_type === 'athlete') {
         const { data: athleteData, error: athleteError } = await supabase
           .from('app_5732e5c77b_athletes')
@@ -222,22 +227,7 @@ export class SupabaseAuth {
           .single()
 
         if (!athleteError && athleteData) {
-          specificData = {
-            phone: athleteData.phone,
-            cpf: athleteData.cpf,
-            birthDate: athleteData.birth_date,
-            playingLevel: athleteData.playing_level,
-            dominantHand: athleteData.dominant_hand,
-            playingStyle: athleteData.playing_style,
-            city: athleteData.city,
-            bio: athleteData.bio,
-            currentRating: athleteData.current_rating,
-            peakRating: athleteData.peak_rating,
-            gamesPlayed: athleteData.games_played,
-            wins: athleteData.wins,
-            losses: athleteData.losses,
-            clubId: athleteData.club_id
-          }
+          specificData = athleteData;
         }
       } else if (userData.user_type === 'club') {
         const { data: clubData, error: clubError } = await supabase
@@ -247,37 +237,35 @@ export class SupabaseAuth {
           .single()
 
         if (!clubError && clubData) {
-          specificData = {
-            cnpj: clubData.cnpj,
-            corporateEmail: clubData.corporate_email,
-            zipCode: clubData.zip_code,
-            street: clubData.street,
-            number: clubData.number,
-            neighborhood: clubData.neighborhood,
-            city: clubData.city,
-            state: clubData.state,
-            legalRepresentative: clubData.legal_representative,
-            website: clubData.website,
-            instagram: clubData.instagram,
-            facebook: clubData.facebook,
-            description: clubData.description,
-            athletesCount: clubData.athletes_count,
-            tournamentsCreated: clubData.tournaments_created,
-            activeTournaments: clubData.active_tournaments
-          }
+            specificData = clubData;
         }
       }
 
-      return {
+      // 3. Combina os dados de 'users' (que tem a foto) com os dados específicos (que tem o resto).
+      // Também faz a "tradução" dos nomes das colunas (ex: birth_date -> birthDate).
+      const combinedUser: SupabaseUser = {
+        ...userData,
+        ...specificData,
         id: userData.id,
         email: userData.email,
-        userType: userData.user_type === 'athlete' ? UserType.ATHLETE : UserType.CLUB,
         name: userData.name,
-        ...specificData
+        userType: userData.user_type === 'athlete' ? UserType.ATHLETE : UserType.CLUB,
+        // Garante que os campos com nomes diferentes sejam mapeados corretamente
+        avatarUrl: userData.avatar_url,
+        birthDate: (specificData as any).birth_date,
+        playingLevel: (specificData as any).playing_level,
+        dominantHand: (specificData as any).dominant_hand,
+        playingStyle: (specificData as any).playing_style,
+        currentRating: (specificData as any).current_rating,
+        peakRating: (specificData as any).peak_rating,
+        gamesPlayed: (specificData as any).games_played,
+        clubId: (specificData as any).club_id,
       }
 
+      return combinedUser;
+
     } catch (error) {
-      console.error('Error getting current user:', error)
+      console.error('Error in getCurrentUser:', error)
       return null
     }
   }

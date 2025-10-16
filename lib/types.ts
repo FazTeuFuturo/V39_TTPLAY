@@ -69,27 +69,44 @@ export interface Tournament {
   address?: string
   entryFee: number
   maxParticipants?: number
-  minParticipants: number
+  minParticipants?: number  // Pode tornar opcional se não usar sempre
+  state?: string
   
   // Technical settings
-  setRule: number // Best of 3 or 5
-  pointsPerSet: number
+  setRule?: number // Tornar opcional se não vier do Supabase
+  pointsPerSet?: number // Tornar opcional
   format: TournamentFormat
   status: TournamentStatus
   
-  // Ranking settings
-  isRanked: boolean
-  kFactor: number
+  // Ranking settings (tornar opcionais)
+  isRanked?: boolean
+  kFactor?: number
+  
+  // Campos do Supabase que estavam faltando
+  createdBy: string  // ⭐ ESTE ERA O PRINCIPAL PROBLEMA
+  rules?: string
+  prizes?: string
   
   createdAt: Date
-  updatedAt: Date
+  updatedAt?: Date
   
-  clubId: string
-  club: Club
-  players: PlayerOnTournament[]
-  matches: Match[]
+  // Dados relacionados
+  clubId?: string  // Tornar opcional
+  club?: Club      // Tornar opcional (pode não vir sempre)
+  players?: PlayerOnTournament[]  // Tornar opcional
+  matches?: Match[]  // Tornar opcional
+  
+  // Propriedades computadas vindas do Supabase
+  categoryCount?: number
+  participantCount?: number
+  categories?: TournamentCategory[]
 }
-
+export interface TournamentCategory {
+  categoryId: string
+  price: number
+  tournament_id: string
+  // Adicione outros campos da categoria conforme necessário
+}
 export interface PlayerOnTournament {
   id: string
   playerId: string
