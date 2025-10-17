@@ -139,6 +139,29 @@ export class SupabaseTournaments {
             return [];
         }
     }
+    // Em src/lib/supabase-tournaments.ts, dentro da classe SupabaseTournaments
+
+static async updateRegistrationDeadline(id: string, newDeadline: string): Promise<boolean> {
+    try {
+        const { error } = await supabase
+            .from('app_5732e5c77b_tournaments')
+            .update({ 
+                registration_deadline: newDeadline,
+                updated_at: new Date().toISOString() 
+            })
+            .eq('id', id);
+        
+        if (error) {
+            console.error('Error updating registration deadline:', error);
+            return false;
+        }
+        
+        return true;
+    } catch (error) {
+        console.error('Error in updateRegistrationDeadline:', error);
+        return false;
+    }
+}
 
     static async getAvailableTournaments(): Promise<SupabaseTournament[]> {
         try {
@@ -288,30 +311,4 @@ export class SupabaseTournaments {
     }
     // Em src/lib/supabase-tournaments.ts, dentro da classe SupabaseTournaments
 
-    static async getAthleteRegistrations(athleteId: string): Promise<SupabaseTournamentRegistration[]> { 
-        try {
-            const { data, error } = await supabase
-                .from('app_5732e5c77b_tournament_registrations')
-                .select('tournament_id, status') // Só precisamos do ID do torneio e do status
-                .eq('athlete_id', athleteId);
-
-            if (error) {
-                console.error('Error fetching athlete registrations:', error);
-                return [];
-            }
-
-            // Mapeia para o formato esperado, mesmo que simplificado
-            return (data || []).map(reg => ({
-                id: '', // Não precisamos do ID do registro aqui
-                tournamentId: reg.tournament_id,
-                athleteId: athleteId,
-                registeredAt: '',
-                status: reg.status,
-            })) as SupabaseTournamentRegistration[];
-
-        } catch (error) {
-            console.error('Error in getAthleteRegistrations:', error);
-            return [];
-        }
     }
-}

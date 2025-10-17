@@ -67,17 +67,16 @@ export function ClubDashboard({ user, onUserUpdate, onLogout }: ClubDashboardPro
 
   // REMOÇÃO: O antigo useEffect que salvava dados no localStorage foi removido aqui.
 
-  const handleTournamentCreated = (tournament: Tournament) => {
-    console.log('🔵 TOURNAMENT CREATED/UPDATED:', tournament)
+  const handleTournamentUpdate = () => {
+    console.log('🔵 A child component requested an update. Reloading tournaments...');
+    // A forma mais segura de garantir a sincronia é recarregar tudo do banco.
+    loadTournaments();
     
-    // Após a criação/atualização no DB, recarregar a lista é o mais seguro
-    loadTournaments() 
-    
-    // Fechar os modais/formulários
-    setShowTournamentCreation(false)
-    setShowTournamentEdit(null)
-  }
-
+    // Fecha qualquer modal que possa estar aberto
+    setShowTournamentCreation(false);
+    setShowTournamentEdit(null);
+    setSelectedTournament(null);
+ } 
   const handleEditTournament = (tournament: Tournament) => {
     console.log('🔵 EDIT TOURNAMENT CLICKED:', tournament.id)
     setShowTournamentEdit(tournament)
@@ -235,26 +234,29 @@ export function ClubDashboard({ user, onUserUpdate, onLogout }: ClubDashboardPro
            tournament.status === TournamentStatus.FINISHED
   }
 
-  const canEditTournament = (tournament: Tournament) => {
-    return tournament.status === TournamentStatus.DRAFT || 
-           tournament.status === TournamentStatus.OPEN
-  }
+
+  const canEditTournament = (tournament: Tournament) => {
+    // Permite editar se for rascunho OU se as inscrições ainda estiverem abertas.
+    return tournament.status === TournamentStatus.DRAFT || new Date() < new Date(tournament.registrationDeadline!);
+  }
 
   const canDeleteTournament = (tournament: Tournament) => {
     return tournament.status !== TournamentStatus.IN_PROGRESS
   }
 
-  const canCloseRegistrations = (tournament: Tournament) => {
-    return tournament.status === TournamentStatus.OPEN
-  }
+ const canCloseRegistrations = (tournament: Tournament) => {
+    // A lógica é a mesma: só pode encerrar se estiver aberto.
+    return new Date() < new Date(tournament.registrationDeadline!);
+  }
 
   const canStartTournament = (tournament: Tournament) => {
     return tournament.status === TournamentStatus.CLOSED
   }
 
-  const canManageRegistrations = (tournament: Tournament) => {
-    return tournament.status === TournamentStatus.OPEN
-  }
+const canManageRegistrations = (tournament: Tournament) => {
+    // A "fonte da verdade" agora é a data limite.
+    return new Date() < new Date(tournament.registrationDeadline!);
+  }
 
   const stats = {
     totalTournaments: tournaments.length,
@@ -344,7 +346,7 @@ export function ClubDashboard({ user, onUserUpdate, onLogout }: ClubDashboardPro
           </div>
           
           <TournamentCreation 
-            onTournamentCreated={handleTournamentCreated}
+            onTournamentCreated={handleTournamentUpdate}
             createdBy={user.id}
           />
         </div>
@@ -368,7 +370,7 @@ export function ClubDashboard({ user, onUserUpdate, onLogout }: ClubDashboardPro
           </div>
           
           <TournamentCreation 
-            onTournamentCreated={handleTournamentCreated}
+            onTournamentCreated={handleTournamentUpdate}
             createdBy={user.id}
             editTournament={showTournamentEdit}
           />
