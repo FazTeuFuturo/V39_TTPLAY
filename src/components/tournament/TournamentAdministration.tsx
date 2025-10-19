@@ -132,6 +132,12 @@ export function TournamentAdministration({ tournament: initialTournament, onBack
     loadTournamentData()
   }, [])
 
+useEffect(() => {
+  // Sincroniza o estado local quando o prop mudar
+  console.log('🔄 Prop initialTournament mudou:', initialTournament.registration_deadline);
+  setTournament(initialTournament);
+}, [initialTournament.registration_deadline, initialTournament.status])
+
   // NOVA LÓGICA: Encerrar inscrições alterando apenas a registration_deadline
 const handleCloseRegistrations = async () => {
     console.log('%c--- Botão ENCERRAR clicado ---', 'color: orange; font-weight: bold;');

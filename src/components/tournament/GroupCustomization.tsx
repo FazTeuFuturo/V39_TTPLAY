@@ -33,12 +33,11 @@ interface TournamentGroup {
 
 interface GroupCustomizationProps {
   tournament: any
+  registeredAthletes: Registration[] // <<< ADICIONE ESTA LINHA
   onBack: () => void
   onSave: (groups: TournamentGroup[]) => void
 }
-
-export function GroupCustomization({ tournament, onBack, onSave }: GroupCustomizationProps) {
-  const [registeredAthletes, setRegisteredAthletes] = useState<Registration[]>([])
+export function GroupCustomization({ tournament, registeredAthletes, onBack, onSave }: GroupCustomizationProps) {
   const [groups, setGroups] = useState<TournamentGroup[]>([])
   const [athletesPerGroup, setAthletesPerGroup] = useState(4)
   const [selectedCategory, setSelectedCategory] = useState<string>('')
@@ -46,47 +45,7 @@ export function GroupCustomization({ tournament, onBack, onSave }: GroupCustomiz
   const [error, setError] = useState('')
   const [isGenerating, setIsGenerating] = useState(false)
 
-  useEffect(() => {
-    loadRegisteredAthletes()
-    loadExistingGroups()
-  }, [tournament.id])
-
-  const loadRegisteredAthletes = () => {
-    try {
-      const savedRegistrations = localStorage.getItem(`registrations_${tournament.id}`)
-      if (savedRegistrations) {
-        const registrations = JSON.parse(savedRegistrations)
-        const parsedRegistrations = registrations.map((reg: any) => ({
-          ...reg,
-          registeredAt: new Date(reg.registeredAt)
-        }))
-        setRegisteredAthletes(parsedRegistrations)
-        
-        // Set first category as default
-        if (parsedRegistrations.length > 0 && !selectedCategory) {
-          const categories = [...new Set(parsedRegistrations.map((r: Registration) => r.category))]
-          setSelectedCategory(categories[0])
-        }
-      }
-    } catch (error) {
-      console.error('Error loading registrations:', error)
-      setError('Erro ao carregar inscrições')
-    }
-  }
-
-  const loadExistingGroups = () => {
-    try {
-      const savedGroups = localStorage.getItem(`tournament_groups_${tournament.id}`)
-      if (savedGroups) {
-        const groups = JSON.parse(savedGroups)
-        setGroups(groups)
-      }
-    } catch (error) {
-      console.error('Error loading groups:', error)
-    }
-  }
-
-  const generateGroups = () => {
+   const generateGroups = () => {
     if (registeredAthletes.length === 0) {
       setError('Nenhum atleta inscrito encontrado')
       return

@@ -107,130 +107,30 @@ export function RegistrationManager({ tournament, onClose, onUpdate }: Registrat
     }
   }
 
-  // FUNÇÃO loadRegistrations - VERSÃO COM JOIN ÚNICO
   const loadRegistrations = async () => {
-  setRegistrations([]); // ← LIMPA O ESTADO PRIMEIRO
-  console.log('🔍 Iniciando loadRegistrations para tournament:', tournament.id);
-    
-    // NOVA ESTRATÉGIA: Começar por tournament_registrations e fazer join com tudo
-    const { data: registrationsData, error: regError } = await supabase
-      .from('app_5732e5c77b_tournament_registrations')
-      .select(`
-        id,
-        athlete_id,
-        tournament_id
-      `)
-      .eq('tournament_id', tournament.id);
+    try {
+      // Esta função RPC busca todos os inscritos e seus detalhes de forma segura e em uma única chamada
+      const { data, error } = await supabase.rpc('get_tournament_registrations_details', { 
+        p_tournament_id: tournament.id 
+      });
 
-    console.log('📦 Tournament Registrations:', registrationsData);
+      if (error) {
+        console.error('Error calling RPC function:', error);
+        throw error;
+      }
+      
+      const formattedRegistrations: EnrichedRegistration[] = data.map((reg: any) => ({
+        ...reg,
+        athlete: { ...reg.athlete, userType: 'athlete' } // Garante a tipagem correta
+      }));
 
-    if (regError) {
-      console.error('❌ Error loading registrations:', regError);
-      throw regError;
+      setRegistrations(formattedRegistrations);
+    } catch (err) {
+      console.error('Falha no loadRegistrations:', err);
+      // Lança o erro para ser pego pelo 'catch' do loadInitialData
+      throw err;
     }
-
-    if (!registrationsData || registrationsData.length === 0) {
-      console.log('⚠️ Nenhuma inscrição encontrada');
-      setRegistrations([]);
-      return;
-    }
-
-    // Buscar as categorias de cada registration
-    const registrationIds = registrationsData.map(r => r.id);
-    const { data: regCategoriesData, error: catError } = await supabase
-      .from('app_5732e5c77b_registration_categories')
-      .select(`
-        id,
-        registration_id,
-        category_id,
-        app_5732e5c77b_categories ( name )
-      `)
-      .in('registration_id', registrationIds);
-
-    console.log('📂 Registration Categories:', regCategoriesData);
-
-    if (catError) {
-      console.error('❌ Error loading categories:', catError);
-      throw catError;
-    }
-
-    // Buscar dados dos atletas (que TEM o nome via RLS!)
-    const athleteIds = [...new Set(registrationsData.map(r => r.athlete_id))];
-    console.log('👥 Athlete IDs:', athleteIds);
-
-    // Tentar buscar users (pode falhar por RLS)
-    const usersResult = await supabase
-      .from('app_5732e5c77b_users')
-      .select('*')
-      .in('id', athleteIds);
-
-    // Buscar athletes (deve funcionar)
-    const athletesResult = await supabase
-      .from('app_5732e5c77b_athletes')
-      .select('*')
-      .in('id', athleteIds);
-
-    console.log('👤 Users result:', usersResult);
-    console.log('🏃 Athletes result:', athletesResult);
-
-    if (athletesResult.error) {
-      console.error('❌ Erro ao buscar atletas:', athletesResult.error);
-      throw athletesResult.error;
-    }
-
-    // Se users falhar por RLS, apenas alerta mas continua
-    if (usersResult.error) {
-      console.warn('⚠️ Sem acesso a users (RLS):', usersResult.error);
-    }
-
-    const usersData = usersResult.data || [];
-    const athletesData = athletesResult.data || [];
-
-    // Criar mapas
-    const usersMap = new Map(usersData.map(u => [u.id, u]));
-    const athletesMap = new Map(athletesData.map(a => [a.id, a]));
-    const regCategoriesMap = new Map(
-      (regCategoriesData || []).map((rc: any) => [rc.registration_id, rc])
-    );
-
-    // Montar resultado final
-    const formattedRegistrations: EnrichedRegistration[] = registrationsData
-      .map(reg => {
-        const regCat = regCategoriesMap.get(reg.id);
-        if (!regCat) return null; // Pula se não tiver categoria
-
-        const athleteId = reg.athlete_id;
-        const userData = usersMap.get(athleteId);
-        const athleteData = athletesMap.get(athleteId);
-
-        console.log('🔗 Montando registro:', {
-          regId: reg.id,
-          athleteId,
-          hasUser: !!userData,
-          hasAthlete: !!athleteData,
-          userName: userData?.name
-        });
-
-        return {
-          registration_id: reg.id,
-          category_registration_id: regCat.id,
-          category_id: regCat.category_id,
-          category_name: regCat.app_5732e5c77b_categories?.name || 'Sem nome',
-          athlete: {
-            ...athleteData,
-            id: athleteId,
-            name: userData?.name || 'Nome não encontrado',
-            email: userData?.email || '',
-            userType: 'athlete',
-          } as SupabaseUser,
-        };
-      })
-      .filter(Boolean) as EnrichedRegistration[];
-
-    console.log('✨ Registrations formatadas:', formattedRegistrations);
-    setRegistrations(formattedRegistrations);
   };
-
   // FUNÇÃO searchAthletes - VERSÃO CORRETA baseada no schema real
   const searchAthletes = async (term: string) => {
     setSearchTerm(term);
@@ -360,70 +260,45 @@ const handleRegisterAthlete = async (athlete: SupabaseUser, categoryId: string) 
   setMessage('');
 
   try {
-    console.log('➕ Adicionando atleta:', athlete.name, 'na categoria:', categoryId);
-    
-    // 1. Buscar registration existente
-    const { data: existingRegs, error: checkError } = await supabase
+    // 1. Verifica se já existe uma inscrição GERAL para o atleta neste torneio
+    const { data: existingRegs } = await supabase
       .from('app_5732e5c77b_tournament_registrations')
       .select('id')
       .eq('tournament_id', tournament.id)
       .eq('athlete_id', athlete.id);
 
-    if (checkError) throw checkError;
-
     let registrationId: string;
 
     if (existingRegs && existingRegs.length > 0) {
-      // Usa o primeiro (pode haver órfãos, mas tudo bem)
       registrationId = existingRegs[0].id;
-      console.log('♻️ Reutilizando registration existente:', registrationId);
     } else {
-      // Criar novo tournament_registration
-      console.log('🆕 Criando novo tournament_registration');
+      // Se não existe, cria a inscrição GERAL
       const { data: newReg, error: regError } = await supabase
         .from('app_5732e5c77b_tournament_registrations')
-        .insert({
-          tournament_id: tournament.id,
-          athlete_id: athlete.id,
-          status: 'registered',
-          total_paid: 0
-        })
-        .select()
+        .insert({ tournament_id: tournament.id, athlete_id: athlete.id, status: 'registered' })
+        .select('id')
         .single();
-
       if (regError) throw regError;
       registrationId = newReg.id;
-      console.log('✅ Novo registration criado:', registrationId);
     }
 
-    // 2. Buscar o preço da categoria
+    // 2. Adiciona o atleta à CATEGORIA específica
     const categoryPrice = tournamentCategories.find(c => c.id === categoryId)?.price || 0;
-
-    // 3. Criar o registration_category
-    console.log('➕ Criando registration_category');
     const { error: catError } = await supabase
       .from('app_5732e5c77b_registration_categories')
-      .insert({
-        registration_id: registrationId,
-        category_id: categoryId,
-        price_paid: categoryPrice
-      });
+      .insert({ registration_id: registrationId, category_id: categoryId, price_paid: categoryPrice });
 
     if (catError) throw catError;
-    console.log('✅ Registration_category criado!');
 
-    // 4. Recarregar dados e limpar busca
+    // 3. Recarrega os dados e notifica o pai
     await loadRegistrations();
-    if (onUpdate) {
-      onUpdate({ ...tournament });
-    }
+    onUpdate(tournament); // Força a atualização do ClubDashboard e do TournamentAdministration
     setSearchedAthletes([]);
     setSearchTerm('');
     setMessage(`${athlete.name} adicionado com sucesso!`);
-    setTimeout(() => setMessage(''), 3000);
 
   } catch (err: any) {
-    console.error('❌ Error registering athlete:', err);
+    console.error('Error registering athlete:', err);
     setError('Erro ao adicionar atleta: ' + err.message);
   } finally {
     setIsSubmitting(false);
@@ -431,17 +306,12 @@ const handleRegisterAthlete = async (athlete: SupabaseUser, categoryId: string) 
 }
 
 const handleUnregisterAthlete = async (registration: EnrichedRegistration) => {
-  if (!confirm(`Tem certeza que deseja remover ${registration.athlete.name} da categoria ${registration.category_name}?`)) {
-    return;
-  }
+  if (!confirm(`Remover ${registration.athlete.name} da categoria ${registration.category_name}?`)) return;
 
   setIsSubmitting(true);
   setError('');
-
   try {
-    console.log('🗑️ Removendo registration_category:', registration.category_registration_id);
-    
-    // 1. Deletar o registro da categoria
+    // 1. Deleta o registro da categoria específica
     const { error: deleteCatError } = await supabase
       .from('app_5732e5c77b_registration_categories')
       .delete()
@@ -449,42 +319,29 @@ const handleUnregisterAthlete = async (registration: EnrichedRegistration) => {
 
     if (deleteCatError) throw deleteCatError;
 
-    // 2. Verificar se o atleta ainda tem outras categorias neste torneio
+    // 2. Verifica se o atleta ainda tem outras categorias neste torneio
     const { data: remainingCategories, error: checkError } = await supabase
       .from('app_5732e5c77b_registration_categories')
       .select('id')
       .eq('registration_id', registration.registration_id);
 
-    console.log('📋 Categorias restantes:', remainingCategories);
-
     if (checkError) throw checkError;
 
-    // 3. Se não tem mais categorias, deletar o registro principal também
+    // 3. Se não tem mais categorias, deleta o registro principal
     if (!remainingCategories || remainingCategories.length === 0) {
-      console.log('🗑️ Deletando tournament_registration:', registration.registration_id);
-      
-      const { error: deleteRegError } = await supabase
+      await supabase
         .from('app_5732e5c77b_tournament_registrations')
         .delete()
         .eq('id', registration.registration_id);
-
-      if (deleteRegError) throw deleteRegError;
-      
-      console.log('✅ Tournament registration deletado!');
     }
 
-    // 4. Recarregar os dados LOCAIS
+    // 4. Recarrega os dados locais e notifica o pai
     await loadRegistrations();
-    
-    // 5. NOVO: Notificar o componente pai (Dashboard) para atualizar
-    if (onUpdate) {
-      onUpdate({ ...tournament });
-    } // Força o dashboard a recarregar
-    
+    onUpdate(tournament); // Força a atualização do ClubDashboard e do TournamentAdministration
     setMessage(`${registration.athlete.name} removido com sucesso!`);
-    setTimeout(() => setMessage(''), 3000);
+
   } catch (err: any) {
-    console.error('❌ Error removing registration:', err);
+    console.error('Error removing registration:', err);
     setError('Erro ao remover inscrição: ' + err.message);
   } finally {
     setIsSubmitting(false);

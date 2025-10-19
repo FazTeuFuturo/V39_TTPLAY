@@ -31,6 +31,7 @@ export function AthleteRegistration({ onSuccess }: AthleteRegistrationProps) {
     phone: '',
     cpf: '',
     birthDate: '',
+    gender: '',
     playingLevel: '',
     dominantHand: '',
     playingStyle: '',
@@ -60,6 +61,7 @@ export function AthleteRegistration({ onSuccess }: AthleteRegistrationProps) {
         phone: formData.phone,
         cpf: formData.cpf,
         birthDate: formData.birthDate,
+        gender: formData.gender,
         playingLevel: formData.playingLevel,
         dominantHand: formData.dominantHand,
         playingStyle: formData.playingStyle,
@@ -246,7 +248,22 @@ export function AthleteRegistration({ onSuccess }: AthleteRegistrationProps) {
               />
             </div>
           </div>
-
+<div className="space-y-2">
+  <Label htmlFor="gender">Gênero *</Label>
+  <Select 
+    value={formData.gender} 
+    onValueChange={(value) => updateFormData('gender', value)}
+    required
+  >
+    <SelectTrigger>
+      <SelectValue placeholder="Selecione seu gênero" />
+    </SelectTrigger>
+    <SelectContent>
+      <SelectItem value="male">Masculino</SelectItem>
+      <SelectItem value="female">Feminino</SelectItem>
+    </SelectContent>
+  </Select>
+</div>
           <div className="space-y-2">
             <Label htmlFor="playingLevel">Nível de Jogo *</Label>
             <Select value={formData.playingLevel} onValueChange={(value) => updateFormData('playingLevel', value)}>
