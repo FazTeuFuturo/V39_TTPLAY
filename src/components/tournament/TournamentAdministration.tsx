@@ -2,6 +2,7 @@
 
 'use client'
 
+import { Registration } from '@/lib/types';
 import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -20,16 +21,8 @@ import { supabase } from '@/lib/supabase'
 import { GroupCustomization } from './GroupCustomization'
 import { MatchManager } from './MatchManager'
 import { BracketManager } from './BracketManager'
+import { RegistrationManager } from './RegistrationManager'
 
-// Tipos de dados
-interface EnrichedRegistration {
-  id: string
-  athleteId: string
-  athleteName: string
-  athleteRating: number
-  city: string | null
-  category: string
-}
 
 interface TournamentGroup {
   id: string
@@ -50,8 +43,9 @@ export function TournamentAdministration({ tournament: initialTournament, onBack
   const [showGroupCustomization, setShowGroupCustomization] = useState(false)
   const [showMatchManager, setShowMatchManager] = useState(false)
   const [showBracketManager, setShowBracketManager] = useState(false)
-  const [registeredAthletes, setRegisteredAthletes] = useState<EnrichedRegistration[]>([])
+  const [registeredAthletes, setRegisteredAthletes] = useState<Registration[]>([]); // <-- Use Registration[]
   const [groups, setGroups] = useState<TournamentGroup[]>([])
+  const [tournamentCategories, setTournamentCategories] = useState<any[]>([])
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [isLoading, setIsLoading] = useState(true)
@@ -104,25 +98,75 @@ export function TournamentAdministration({ tournament: initialTournament, onBack
       
       if (athletesError) throw athletesError
       
-      // 5. Combina todos os dados
-      const athletes = usersData?.map((user: any) => {
-        const athleteData = athletesData?.find((a: any) => a.id === user.id)
-        return {
-          id: user.id,
-          athleteId: user.id,
-          athleteName: user.name,
-          athleteRating: athleteData?.current_rating || 1200,
-          city: athleteData?.city || 'N/A',
-          category: 'Geral'
-        }
-      }) || []
-      
-      setRegisteredAthletes(athletes)
-      setGroups([])
+      // NOTA: Sua lógica atual de `registeredAthletes` não pega a categoria
+      // corretamente. A RPC `get_tournament_registrations_details` seria melhor aqui.
+    const athletes: Registration[] = usersData?.map((user: any) => {
+    const athleteData = athletesData?.find((a: any) => a.id === user.id);
+    const registrationData = registrationsData?.find((r: any) => r.athlete_id === user.id); // Pega a data de registro
+        return {
+        id: user.id,
+        athleteId: user.id,
+        athleteName: user.name,
+        athleteRating: athleteData?.current_rating || 1200,
+        athleteLevel: athleteData?.playing_level || null, // Preenche athleteLevel
+        athleteCity: athleteData?.city || null,         // Preenche athleteCity
+        category: 'Geral', // Precisa buscar a categoria real aqui
+        registeredAt: registrationData?.registered_at ? new Date(registrationData.registered_at) : new Date() // Preenche registeredAt
+    }
+      }) || []
+      setRegisteredAthletes(athletes)
+
+      // 6. Carrega as categorias do torneio (Mantém sua lógica original)
+      const { data: tournamentCategoriesData, error: tcError } = await supabase
+          .from('app_5732e5c77b_tournament_categories')
+          .select('category_id, price')
+          .eq('tournament_id', tournament.id);
+
+      if (!tcError && tournamentCategoriesData && tournamentCategoriesData.length > 0) {
+          const categoryIds = tournamentCategoriesData.map(tc => tc.category_id);
+          const { data: categoriesData, error: catError } = await supabase
+              .from('app_5732e5c77b_categories')
+              .select('*') // Pega todos os campos da categoria
+              .in('id', categoryIds);
+
+          if (!catError && categoriesData) {
+              const categoriesWithPrices = categoriesData.map(cat => {
+                  const tcRelation = tournamentCategoriesData.find(tc => tc.category_id === cat.id);
+                  return { ...cat, price: tcRelation?.price || 0 };
+              });
+              setTournamentCategories(categoriesWithPrices); // Salva as categorias completas
+          }
+      } else {
+          setTournamentCategories([]); // Garante que esteja vazio se não houver categorias
+      }
+
+      // 7. CARREGA OS GRUPOS SALVOS (Substitui o setGroups([]) )
+      console.log(`🔄 Carregando grupos para o torneio ID: ${tournament.id}`);
+      const { data: savedGroupsData, error: groupsError } = await supabase
+        .from('tournament_groups')
+        .select(`
+          id,
+          name,
+          category:app_5732e5c77b_categories(name)
+        `)
+        .eq('tournament_id', tournament.id);
+
+      if (groupsError) throw groupsError;
+
+      // Reconstrói o formato esperado pela sua interface TournamentGroup
+      const reconstructedGroups: TournamentGroup[] = (savedGroupsData || []).map(group => ({
+        id: group.id,
+        name: group.name,
+        category: group.category?.name || 'Sem Categoria',
+        athletes: [] // Carregamos apenas a estrutura do grupo aqui para simplificar
+      }));
+
+      console.log(`✅ ${reconstructedGroups.length} grupos carregados.`);
+      setGroups(reconstructedGroups); // <<< DEFINE OS GRUPOS CARREGADOS
 
     } catch (err: any) {
       setError("Falha ao carregar dados de administração: " + err.message)
-      console.error(err)
+      console.error(err);
     } finally {
       setIsLoading(false)
     }
@@ -302,13 +346,14 @@ const handleReopenRegistrations = async () => {
 
   // Lógica para os sub-componentes (modais)
   if (showGroupCustomization) {
-    return <GroupCustomization 
-      tournament={tournament} 
-      registeredAthletes={registeredAthletes} 
-      onSave={handleGroupsSaved} 
-      onBack={() => setShowGroupCustomization(false)} 
-    />
-  }
+  return <GroupCustomization 
+    tournament={tournament} 
+    registeredAthletes={registeredAthletes}
+    tournamentCategories={tournamentCategories}
+    onSave={handleGroupsSaved} 
+    onBack={() => setShowGroupCustomization(false)} 
+  />
+}
 
   return (
     <div className="space-y-6">
@@ -428,51 +473,61 @@ const handleReopenRegistrations = async () => {
               </Card>
             </TabsContent>
 
-            <TabsContent value="registrations" className="mt-4">
-              <Card>
-                <CardHeader>
-                  <div className="flex justify-between items-center">
-                    <div>
-                      <CardTitle>Atletas Inscritos</CardTitle>
-                      <CardDescription>
-                        {registeredAthletes.length} atletas • 
-                        Prazo: {formatDate(tournament.registration_deadline)}
-                      </CardDescription>
-                    </div>
-                    <div className="flex gap-2">
-                      {areRegistrationsOpen() ? (
-                        <Button onClick={handleCloseRegistrations} variant="outline">
-                          <Clock className="h-4 w-4 mr-2"/>
-                          Encerrar Inscrições
-                        </Button>
-                      ) : (
-                        <Button onClick={handleReopenRegistrations} variant="outline">
-                          <LockOpen className="h-4 w-4 mr-2"/>
-                          Reabrir Inscrições
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  {registeredAthletes.length === 0 ? (
-                    <p className="text-center p-4 text-muted-foreground">Nenhum atleta inscrito.</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {registeredAthletes.map(athlete => (
-                        <div key={athlete.id} className="flex justify-between items-center p-3 border rounded hover:bg-accent">
-                          <div>
-                            <p className="font-medium">{athlete.athleteName}</p>
-                            <p className="text-sm text-muted-foreground">Rating: {athlete.athleteRating}</p>
-                          </div>
-                          <Badge variant="outline">{athlete.city}</Badge>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </TabsContent>
+<TabsContent value="registrations" className="mt-4">
+  <Card>
+    <CardHeader>
+      <div className="flex justify-between items-center">
+        <div>
+          <CardTitle>Gerenciar Inscrições</CardTitle>
+          <CardDescription>
+            {registeredAthletes.length} atletas inscritos • 
+            Prazo: {formatDate(tournament.registration_deadline)}
+          </CardDescription>
+        </div>
+        <div className="flex gap-2">
+          {areRegistrationsOpen() ? (
+            <Button onClick={handleCloseRegistrations} variant="outline">
+              <Clock className="h-4 w-4 mr-2"/>
+              Encerrar Inscrições
+            </Button>
+          ) : (
+            <Button onClick={handleReopenRegistrations} variant="outline">
+              <LockOpen className="h-4 w-4 mr-2"/>
+              Reabrir Inscrições
+            </Button>
+          )}
+        </div>
+      </div>
+    </CardHeader>
+    <CardContent>
+      {showMatchManager ? (
+        <RegistrationManager 
+          tournament={tournament}
+          onClose={() => setShowMatchManager(false)}
+          onUpdate={(updatedTournament) => {
+            setTournament(updatedTournament)
+            onUpdate(updatedTournament)
+            loadTournamentData()
+          }}
+        />
+      ) : (
+        <div className="text-center space-y-4 p-8">
+          <UserPlus className="h-12 w-12 mx-auto text-muted-foreground" />
+          <div>
+            <h3 className="text-lg font-medium mb-2">Gerenciamento de Inscrições</h3>
+            <p className="text-sm text-muted-foreground mb-4">
+              Adicione ou remova atletas manualmente, busque por nome ou CPF, e gerencie as categorias.
+            </p>
+          </div>
+          <Button onClick={() => setShowMatchManager(true)} size="lg">
+            <UserPlus className="h-4 w-4 mr-2" />
+            Abrir Gerenciador
+          </Button>
+        </div>
+      )}
+    </CardContent>
+  </Card>
+</TabsContent>
             
             <TabsContent value="groups" className="mt-4">
               <Card>
@@ -484,25 +539,63 @@ const handleReopenRegistrations = async () => {
                       : 'Aguarde o encerramento das inscrições para gerar grupos.'}
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="text-center space-y-4 p-8">
-                  {groups.length > 0 ? (
-                    <p className="text-muted-foreground">{groups.length} grupos já foram gerados para este torneio.</p>
-                  ) : (
-                    <p className="text-muted-foreground">Nenhum grupo gerado ainda.</p>
-                  )}
-                  <Button 
-                    onClick={() => setShowGroupCustomization(true)} 
-                    disabled={areRegistrationsOpen()}
-                    size="lg"
-                  >
-                    <Shuffle className="h-4 w-4 mr-2" /> 
-                    {groups.length > 0 ? 'Editar Grupos' : 'Gerar Grupos'}
-                  </Button>
-                  {areRegistrationsOpen() && (
-                    <p className="text-xs text-muted-foreground">
-                      As inscrições ainda estão abertas. Encerre-as primeiro para gerar os grupos.
-                    </p>
-                  )}
+<CardContent className="space-y-4 p-4 md:p-6">
+                    {isLoading ? ( // Usa o isLoading geral
+                        <p className="text-center text-muted-foreground py-4">Carregando grupos...</p>
+                    ) : groups.length === 0 ? (
+                        // Estado vazio original
+                        <div className="text-center p-8">
+                            <Users className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+                            <h3 className="text-lg font-medium">Nenhum grupo gerado ainda</h3>
+                        </div>
+                    ) : (
+                        // NOVO: Estado com grupos carregados
+                        // Organiza por categoria
+                        Object.entries(
+                            groups.reduce((acc, group) => {
+                                const categoryName = group.category || 'Sem Categoria';
+                                if (!acc[categoryName]) acc[categoryName] = [];
+                                acc[categoryName].push(group);
+                                return acc;
+                            }, {} as Record<string, TournamentGroup[]>) // Usa a sua interface TournamentGroup
+                        ).map(([categoryName, categoryGroups]) => (
+                            <Card key={categoryName}>
+                                <CardHeader className="py-3 px-4">
+                                    {/* Exibe o nome da categoria e quantos grupos */}
+                                    <CardTitle className="flex justify-between items-center text-base">
+                                        <span>{categoryName}</span>
+                                        <Badge variant="outline">{categoryGroups.length} grupos</Badge>
+                                    </CardTitle>
+                                </CardHeader>
+                                {/* Opcional: Mostrar os nomes dos grupos */}
+                                {/* <CardContent className="flex flex-wrap gap-2 px-4 pb-3">
+                                    {categoryGroups.map(group => (
+                                        <Badge key={group.id} variant="secondary">
+                                            {group.name.replace(`${categoryName} - `, '')}
+                                        </Badge>
+                                    ))}
+                                </CardContent> 
+                                */}
+                            </Card>
+                        ))
+                    )}
+
+                    {/* Botão para Gerenciar/Gerar Grupos (Mantém sua lógica) */}
+                    <div className="text-center pt-4">
+                        <Button
+                            onClick={() => setShowGroupCustomization(true)}
+                            disabled={areRegistrationsOpen()}
+                            size="lg"
+                        >
+                            <Shuffle className="h-4 w-4 mr-2" />
+                            {groups.length > 0 ? 'Gerenciar Grupos' : 'Gerar Grupos'}
+                        </Button>
+                        {areRegistrationsOpen() && (
+                            <p className="text-xs text-muted-foreground mt-2">
+                                As inscrições ainda estão abertas. Encerre-as primeiro para {groups.length > 0 ? 'gerenciar' : 'gerar'} os grupos.
+                            </p>
+                        )}
+                    </div>
                 </CardContent>
               </Card>
             </TabsContent>

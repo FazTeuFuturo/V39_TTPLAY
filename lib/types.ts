@@ -62,9 +62,9 @@ export interface Tournament {
   id: string
   name: string
   description?: string
-  startDate: Date
-  endDate?: Date
-  registrationDeadline?: Date
+  start_date: string; // <-- Correto
+  end_date?: string;   // <-- Correto
+  registration_deadline?: string; // <-- Correto
   location: string
   address?: string
   entryFee: number

@@ -146,6 +146,8 @@ const handleCropAndUpload = async () => {
   
   // AthleteProfile.tsx - substitua a função inteira
 
+// Em AthleteProfile.tsx
+
 const handleSave = async () => {
   setIsSaving(true);
   setError('');
@@ -154,9 +156,8 @@ const handleSave = async () => {
   try {
     let finalAvatarUrl = formData.avatarUrl;
 
-    // ETAPA 1: VERIFICA E FAZ UPLOAD DA NOVA FOTO (SE HOUVER)
+    // ETAPA 1: UPLOAD DA NOVA FOTO (Seu código aqui está correto)
     if (newAvatarBlob) {
-      // Apaga a foto antiga do Storage
       if (formData.avatarUrl) {
         const oldFilePath = formData.avatarUrl.split('/avatars/')[1];
         if (oldFilePath) await supabase.storage.from('avatars').remove([oldFilePath.split('?t=')[0]]);
@@ -170,7 +171,7 @@ const handleSave = async () => {
       finalAvatarUrl = `${publicUrl}?t=${new Date().getTime()}`;
     }
 
-    // ETAPA 2: ATUALIZA A TABELA 'users' (NOME E FOTO)
+    // ETAPA 2: ATUALIZA A TABELA 'users'
     const userData = {
         name: formData.name,
         avatar_url: finalAvatarUrl
@@ -178,27 +179,38 @@ const handleSave = async () => {
     const { error: userError } = await supabase.from('app_5732e5c77b_users').update(userData).eq('id', user.id);
     if (userError) throw userError;
 
-    // ETAPA 3: ATUALIZA A TABELA 'athletes' (GÊNERO E OUTROS DADOS)
+    // ETAPA 3: FAZ "UPSERT" NA TABELA 'athletes' (COM A CORREÇÃO)
     const athleteData = {
-        phone: formData.phone,
-        cpf: formData.cpf,
-        birth_date: formData.birthDate,
-        gender: formData.gender,
-        city: formData.city,
-        playing_level: formData.playingLevel,
-        dominant_hand: formData.dominantHand,
-        playing_style: formData.playingStyle,
-        bio: formData.bio
+        id: user.id, // Obrigatório para o 'upsert'
+        phone: formData.phone || null,
+        cpf: formData.cpf || null,
+        birth_date: formData.birthDate || null,
+        gender: formData.gender, // 'gender' é obrigatório, então não precisa de '|| null'
+        city: formData.city || null,
+        bio: formData.bio || null,
+
+        // --- INÍCIO DA CORREÇÃO ---
+        // Converte strings vazias "" para null, para não violar os 'CHECKs' do banco
+        playing_level: formData.playingLevel || null,
+        dominant_hand: formData.dominantHand || null,
+        playing_style: formData.playingStyle || null
+        // --- FIM DA CORREÇÃO ---
     };
-    const { error: athletesError } = await supabase.from('app_5732e5c77b_athletes').update(athleteData).eq('id', user.id);
+
+    // Use .upsert() para criar o registro se ele não existir (caso 'tito')
+    // ou atualizá-lo se existir (caso 'velho')
+    const { error: athletesError } = await supabase
+        .from('app_5732e5c77b_athletes')
+        .upsert(athleteData); 
+
     if (athletesError) throw athletesError;
     
-    // ETAPA 4: ATUALIZA O ESTADO LOCAL E LIMPA A PRÉVIA
+    // ETAPA 4: ATUALIZA O ESTADO LOCAL
     const updatedUserInStorage = { ...user, ...formData, avatarUrl: finalAvatarUrl };
     AuthStorage.updateUser(updatedUserInStorage);
     setNewAvatarBlob(null);
     setNewAvatarPreview(null);
-    setFormData(prev => ({...prev, avatarUrl: finalAvatarUrl})); // Garante que a UI reflita a nova URL
+    setFormData(prev => ({...prev, avatarUrl: finalAvatarUrl}));
 
     setSuccess('Perfil atualizado com sucesso!');
     setIsEditing(false);

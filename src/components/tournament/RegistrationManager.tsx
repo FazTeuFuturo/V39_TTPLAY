@@ -78,56 +78,96 @@ export function RegistrationManager({ tournament, onClose, onUpdate }: Registrat
   }, [loadInitialData]);
 
   // Busca os detalhes completos das categorias deste torneio
-  const loadTournamentCategoryDetails = async () => {
-    const categoryIds = tournament.categories?.map(c => c.categoryId) || [];
-    if (categoryIds.length === 0) {
-        setTournamentCategories([]);
-        return;
-    }
-    const { data, error } = await supabase
-        .from('app_5732e5c77b_categories')
-        .select('*')
-        .in('id', categoryIds);
+const loadTournamentCategoryDetails = async () => {
+  try {
+    console.log("🔍 Buscando categorias do torneio ID:", tournament.id);
+    
+    // Busca as categorias associadas ao torneio na tabela de relacionamento
+    const { data: tournamentCategoriesData, error: tcError } = await supabase
+      .from('app_5732e5c77b_tournament_categories')
+      .select('category_id, price')
+      .eq('tournament_id', tournament.id);
 
-    if (error) {
-        console.error("Error fetching category details:", error);
-        return;
+    console.log("📦 Tournament Categories:", tournamentCategoriesData);
+
+    if (tcError) {
+      console.error("❌ Error fetching tournament categories:", tcError);
+      setError("Erro ao buscar categorias do torneio: " + tcError.message);
+      return;
+    }
+
+    if (!tournamentCategoriesData || tournamentCategoriesData.length === 0) {
+      console.warn("⚠️ Tournament has no categories");
+      setTournamentCategories([]);
+      setError("Este torneio não possui categorias cadastradas.");
+      return;
+    }
+
+    const categoryIds = tournamentCategoriesData.map(tc => tc.category_id);
+
+    // Busca os detalhes das categorias
+    const { data: categoriesData, error: categoriesError } = await supabase
+      .from('app_5732e5c77b_categories')
+      .select('*')
+      .in('id', categoryIds);
+
+    console.log("📦 Categories Details:", categoriesData);
+
+    if (categoriesError) {
+      console.error("❌ Error fetching category details:", categoriesError);
+      setError("Erro ao buscar detalhes das categorias: " + categoriesError.message);
+      return;
     }
     
     // Adiciona o preço à categoria
-    const categoriesWithPrices = data.map(cat => {
-        const catWithPrice = tournament.categories?.find(tc => tc.categoryId === cat.id);
-        return { ...cat, price: catWithPrice?.price || 0 };
+    const categoriesWithPrices = categoriesData.map(cat => {
+      const tcRelation = tournamentCategoriesData.find(tc => tc.category_id === cat.id);
+      return { ...cat, price: tcRelation?.price || 0 };
     });
 
+    console.log("✅ Categories with prices:", categoriesWithPrices);
+
     setTournamentCategories(categoriesWithPrices);
+    
     // Seleciona a primeira categoria por padrão
     if (categoriesWithPrices.length > 0) {
-        setSelectedCategoryId(categoriesWithPrices[0].id);
+      setSelectedCategoryId(categoriesWithPrices[0].id);
     }
+  } catch (err) {
+    console.error("💥 Unexpected error loading categories:", err);
+    setError("Erro inesperado ao carregar categorias do torneio");
   }
+}
 
-  const loadRegistrations = async () => {
+const loadRegistrations = async () => {
     try {
-      // Esta função RPC busca todos os inscritos e seus detalhes de forma segura e em uma única chamada
+      console.log('🔵 [loadRegistrations] Iniciando busca para torneio:', tournament.id);
+      
       const { data, error } = await supabase.rpc('get_tournament_registrations_details', { 
         p_tournament_id: tournament.id 
       });
 
       if (error) {
-        console.error('Error calling RPC function:', error);
+        console.error('❌ [loadRegistrations] Error calling RPC function:', error);
         throw error;
       }
       
-      const formattedRegistrations: EnrichedRegistration[] = data.map((reg: any) => ({
+      console.log('📦 [loadRegistrations] Dados retornados do RPC:', data);
+      console.log('📊 [loadRegistrations] Total de registros:', data?.length || 0);
+      
+      const formattedRegistrations: EnrichedRegistration[] = (data || []).map((reg: any) => ({
         ...reg,
-        athlete: { ...reg.athlete, userType: 'athlete' } // Garante a tipagem correta
+        athlete: { ...reg.athlete, userType: 'athlete' }
       }));
 
-      setRegistrations(formattedRegistrations);
+      console.log('✅ [loadRegistrations] Registros formatados:', formattedRegistrations.length);
+      
+      // FORCE um novo array para garantir re-render
+      setRegistrations([...formattedRegistrations]);
+      
+      console.log('✅ [loadRegistrations] Estado atualizado com', formattedRegistrations.length, 'registros');
     } catch (err) {
-      console.error('Falha no loadRegistrations:', err);
-      // Lança o erro para ser pego pelo 'catch' do loadInitialData
+      console.error('❌ [loadRegistrations] Falha:', err);
       throw err;
     }
   };
@@ -290,13 +330,47 @@ const handleRegisterAthlete = async (athlete: SupabaseUser, categoryId: string) 
 
     if (catError) throw catError;
 
-    // 3. Recarrega os dados e notifica o pai
+// CONFIRMA que o registro foi salvo
+    console.log('✅ [handleRegisterAthlete] Inscrição criada:');
+    console.log('   - Registration ID:', registrationId);
+    console.log('   - Athlete ID:', athlete.id);
+    console.log('   - Category ID:', categoryId);
+// Aguarda 300ms para o banco processar
+    await new Promise(resolve => setTimeout(resolve, 300));
+    console.log('🔄 [handleRegisterAthlete] Recarregando lista de inscritos...');
+      // Força o reload
     await loadRegistrations();
+    console.log('✅ [handleRegisterAthlete] Lista atualizada!');
+
+    // VERIFICAÇÃO: Busca DIRETAMENTE o que acabou de ser inserido
+    const { data: justInserted, error: verifyError } = await supabase
+      .from('app_5732e5c77b_registration_categories')
+      .select('*')
+      .eq('registration_id', registrationId)
+      .eq('category_id', categoryId)
+      .single();
+    
+    console.log('🔍 [handleRegisterAthlete] Verificando inserção no banco:', justInserted);
+    
+    if (verifyError) {
+      console.error('❌ [handleRegisterAthlete] Erro ao verificar inserção:', verifyError);
+    }
+
+    // 3. Recarrega os dados e notifica o pai
+    console.log('🟢 [handleRegisterAthlete] Atleta registrado com sucesso!');
+    
+    // Aguarda 500ms para garantir que o banco processou
+    console.log('⏳ [handleRegisterAthlete] Aguardando 500ms...');
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    console.log('🔄 [handleRegisterAthlete] Recarregando registrations...');
+    await loadRegistrations();
+    console.log('✅ [handleRegisterAthlete] Registrations recarregados!');
     onUpdate(tournament); // Força a atualização do ClubDashboard e do TournamentAdministration
     setSearchedAthletes([]);
     setSearchTerm('');
     setMessage(`${athlete.name} adicionado com sucesso!`);
-
+    setTimeout(() => setMessage(''), 3000);
   } catch (err: any) {
     console.error('Error registering athlete:', err);
     setError('Erro ao adicionar atleta: ' + err.message);
@@ -305,7 +379,14 @@ const handleRegisterAthlete = async (athlete: SupabaseUser, categoryId: string) 
   }
 }
 
+// Em RegistrationManager.tsx
+
 const handleUnregisterAthlete = async (registration: EnrichedRegistration) => {
+  if (!registration.category_registration_id) {
+    setError("Erro: Este registro não pode ser removido (sem ID de categoria).");
+    return;
+  }
+  
   if (!confirm(`Remover ${registration.athlete.name} da categoria ${registration.category_name}?`)) return;
 
   setIsSubmitting(true);
@@ -315,11 +396,11 @@ const handleUnregisterAthlete = async (registration: EnrichedRegistration) => {
     const { error: deleteCatError } = await supabase
       .from('app_5732e5c77b_registration_categories')
       .delete()
-      .eq('id', registration.category_registration_id);
+      .eq('id', registration.category_registration_id); // Use o ID único
 
     if (deleteCatError) throw deleteCatError;
 
-    // 2. Verifica se o atleta ainda tem outras categorias neste torneio
+    // 2. Verifica se o atleta ainda tem outras categorias
     const { data: remainingCategories, error: checkError } = await supabase
       .from('app_5732e5c77b_registration_categories')
       .select('id')
@@ -327,7 +408,7 @@ const handleUnregisterAthlete = async (registration: EnrichedRegistration) => {
 
     if (checkError) throw checkError;
 
-    // 3. Se não tem mais categorias, deleta o registro principal
+    // 3. Se não tem mais, deleta o registro principal
     if (!remainingCategories || remainingCategories.length === 0) {
       await supabase
         .from('app_5732e5c77b_tournament_registrations')
@@ -335,12 +416,25 @@ const handleUnregisterAthlete = async (registration: EnrichedRegistration) => {
         .eq('id', registration.registration_id);
     }
 
-    // 4. Recarrega os dados locais e notifica o pai
-    await loadRegistrations();
-    onUpdate(tournament); // Força a atualização do ClubDashboard e do TournamentAdministration
-    setMessage(`${registration.athlete.name} removido com sucesso!`);
+    // 4. ATUALIZAÇÃO MANUAL (OTIMISTA)
+    // REMOVA a chamada `await loadRegistrations()` daqui!
+    
+    setRegistrations(prevRegistrations => 
+        prevRegistrations.filter(
+            reg => reg.category_registration_id !== registration.category_registration_id
+        )
+    );
+
+    console.log('✅ Atleta removido (localmente).');
+    onUpdate(tournament); 
+    
+    // 5. CORREÇÃO DO CRASH
+    // A linha 404 estava usando 'athlete.name'. O correto é 'registration.athlete.name'
+    setMessage(`${registration.athlete.name} removido com sucesso da categoria ${registration.category_name}!`);
+    setTimeout(() => setMessage(''), 3000);
 
   } catch (err: any) {
+    // O erro (linha 407) será pego aqui
     console.error('Error removing registration:', err);
     setError('Erro ao remover inscrição: ' + err.message);
   } finally {
@@ -362,11 +456,18 @@ const handleUnregisterAthlete = async (registration: EnrichedRegistration) => {
         <Button variant="outline" onClick={onClose}><X className="h-4 w-4 mr-2" /> Fechar</Button>
       </div>
 
+      {message && (
+  <Alert className="border-green-200 bg-green-50">
+    <CheckCircle className="h-4 w-4 text-green-600" />
+    <AlertDescription>{message}</AlertDescription>
+  </Alert>
+)}
+
       {error && <Alert variant="destructive"><AlertCircle className="h-4 w-4" /><AlertDescription>{error}</AlertDescription></Alert>}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Card><CardContent className="p-4"><p className="text-sm font-medium text-muted-foreground">Inscrições Totais</p><p className="text-2xl font-bold">{registrations.length}</p></CardContent></Card>
-        <Card><CardContent className="p-4"><p className="text-sm font-medium text-muted-foreground">Vagas Restantes</p><p className="text-2xl font-bold">{Math.max(0, tournament.maxParticipants - registrations.length)}</p></CardContent></Card>
+        <Card><CardContent className="p-4"><p className="text-sm font-medium text-muted-foreground">Inscrições Totais</p><p className="text-2xl font-bold">{new Set(registrations.map(r => r.athlete.id)).size}</p></CardContent></Card>
+        <Card><CardContent className="p-4"><p className="text-sm font-medium text-muted-foreground">Vagas Restantes</p><p className="text-2xl font-bold">{Math.max(0, tournament.maxParticipants - new Set(registrations.map(r => r.athlete.id)).size)}</p></CardContent></Card>
         <Card><CardContent className="p-4"><p className="text-sm font-medium text-muted-foreground">Categorias</p><p className="text-2xl font-bold">{tournamentCategories.length}</p></CardContent></Card>
       </div>
 

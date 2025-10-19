@@ -109,6 +109,7 @@ export class SupabaseAuth {
           .from('app_5732e5c77b_athletes')
           .insert({
             id: userId,
+            gender: userData.gender,
             phone: userData.phone || null,
             cpf: userData.cpf || null,
             birth_date: userData.birthDate || null,

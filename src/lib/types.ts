@@ -120,14 +120,25 @@ export interface Club {
   updatedAt: Date
 }
 
+export interface Registration {
+  id: string;          // ID do Atleta
+  athleteId: string;   // ID do Atleta (redundante?)
+  athleteName: string;
+  athleteRating: number;
+  athleteLevel: string | null; // Adicione null se puder ser vazio
+  athleteCity: string | null; // Adicione null se puder ser vazio
+  category: string;      // Nome da categoria
+  registeredAt: Date;   // Data de registro
+}
+
 export interface Tournament {
   id: string
   name: string
   description?: string
   createdBy: string 
-  startDate: Date
-  endDate?: Date // Corrigido para ser opcional
-  registrationDeadline?: Date // Corrigido para ser opcional
+  start_date: string; // <-- Correto
+  end_date?: string;   // <-- Correto
+  registration_deadline?: string; // <-- Correto
   location: string // Adicionado, pois é usado no frontend
   rules?: string // Adicionado, pois é usado no frontend
   prizes?: string // Adicionado, pois é usado no frontend
