@@ -777,11 +777,8 @@ const canManageRegistrations = (tournament: Tournament) => {
                 </div>
               </TabsContent>
               <TabsContent value="profile" className="mt-0">
-                <ClubProfile 
-                    user={user} 
-                    onUpdate={onUserUpdate} // Corrigido para passar a função de atualização correta
-                />
-              </TabsContent>
+                <ClubProfile user={user} />
+  nbsp;           </TabsContent>
 
               <TabsContent value="settings" className="mt-0">
                 <Card className="border-2">

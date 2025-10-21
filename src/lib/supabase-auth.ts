@@ -197,79 +197,93 @@ export class SupabaseAuth {
 
  // Substitua a função inteira no seu arquivo de autenticação
 
-  static async getCurrentUser(): Promise<SupabaseUser | null> {
-    try {
-      const { data: { user: authUser }, error: authError } = await supabase.auth.getUser()
-      
-      if (authError || !authUser) {
-        return null
-      }
+// Em lib/supabase-auth.ts
 
-      // 1. Busca os dados da tabela 'users' primeiro. Isso nos dá o 'user_type' e a 'avatar_url'.
-      const { data: userData, error: userError } = await supabase
-        .from('app_5732e5c77b_users')
-        .select('*')
-        .eq('id', authUser.id)
-        .single()
+  static async getCurrentUser(): Promise<SupabaseUser | null> {
+    try {
+      const { data: { user: authUser }, error: authError } = await supabase.auth.getUser()
+      
+      if (authError || !authUser) {
+        return null
+      }
 
-      if (userError || !userData) {
-        console.error('Error fetching base user data:', userError)
-        return null
-      }
+      // 1. Busca os dados da tabela 'users'
+      const { data: userData, error: userError } = await supabase
+        .from('app_5732e5c77b_users')
+        .select('*')
+        .eq('id', authUser.id)
+        .single()
 
-      let specificData = {}
+      if (userError || !userData) {
+        console.error('Error fetching base user data:', userError)
+        return null
+      }
 
-      // 2. Baseado no 'user_type', busca os dados da tabela específica.
-      if (userData.user_type === 'athlete') {
-        const { data: athleteData, error: athleteError } = await supabase
-          .from('app_5732e5c77b_athletes')
-          .select('*')
-          .eq('id', authUser.id)
-          .single()
+      let specificData = {}
 
-        if (!athleteError && athleteData) {
-          specificData = athleteData;
-        }
-      } else if (userData.user_type === 'club') {
-        const { data: clubData, error: clubError } = await supabase
-          .from('app_5732e5c77b_clubs')
-          .select('*')
-          .eq('id', authUser.id)
-          .single()
+      // 2. Baseado no 'user_type', busca os dados da tabela específica.
+      if (userData.user_type === 'athlete') {
+        const { data: athleteData, error: athleteError } = await supabase
+          .from('app_5732e5c77b_athletes')
+          .select('*')
+          .eq('id', authUser.id)
+          .single()
 
-        if (!clubError && clubData) {
-            specificData = clubData;
-        }
-      }
+        if (!athleteError && athleteData) {
+          specificData = athleteData;
+        }
+      } else if (userData.user_type === 'club') {
+        const { data: clubData, error: clubError } = await supabase
+          .from('app_5732e5c77b_clubs')
+          .select('*')
+          .eq('id', authUser.id)
+          .single()
 
-      // 3. Combina os dados de 'users' (que tem a foto) com os dados específicos (que tem o resto).
-      // Também faz a "tradução" dos nomes das colunas (ex: birth_date -> birthDate).
-      const combinedUser: SupabaseUser = {
-        ...userData,
-        ...specificData,
-        id: userData.id,
-        email: userData.email,
-        name: userData.name,
-        userType: userData.user_type === 'athlete' ? UserType.ATHLETE : UserType.CLUB,
-        // Garante que os campos com nomes diferentes sejam mapeados corretamente
-        avatarUrl: userData.avatar_url,
-        birthDate: (specificData as any).birth_date,
-        playingLevel: (specificData as any).playing_level,
-        dominantHand: (specificData as any).dominant_hand,
-        playingStyle: (specificData as any).playing_style,
-        currentRating: (specificData as any).current_rating,
-        peakRating: (specificData as any).peak_rating,
-        gamesPlayed: (specificData as any).games_played,
-        clubId: (specificData as any).club_id,
-      }
+        if (!clubError && clubData) {
+            specificData = clubData;
+        }
+      }
 
-      return combinedUser;
+      // 3. Combina os dados e faz a "tradução" dos nomes das colunas
+      // (snake_case do DB para camelCase da aplicação)
+      const combinedUser: SupabaseUser = {
+        // Dados base (já estão corretos)
+        ...userData,
+        ...specificData,
+        id: userData.id,
+        email: userData.email,
+        name: userData.name,
+        userType: userData.user_type === 'athlete' ? UserType.ATHLETE : UserType.CLUB,
+        
+        // Mapeamento Atleta
+        avatarUrl: userData.avatar_url,
+        birthDate: (specificData as any).birth_date,
+        playingLevel: (specificData as any).playing_level,
+        dominantHand: (specificData as any).dominant_hand,
+        playingStyle: (specificData as any).playing_style,
+        currentRating: (specificData as any).current_rating,
+        peakRating: (specificData as any).peak_rating,
+        gamesPlayed: (specificData as any).games_played,
+        clubId: (specificData as any).club_id,
 
-    } catch (error) {
-      console.error('Error in getCurrentUser:', error)
-      return null
-    }
-  }
+        // --- INÍCIO DA CORREÇÃO ---
+        // Mapeamento Clube
+        corporateEmail: (specificData as any).corporate_email,
+        zipCode: (specificData as any).zip_code,
+        legalRepresentative: (specificData as any).legal_representative,
+        athletesCount: (specificData as any).athletes_count,
+        tournamentsCreated: (specificData as any).tournaments_created,
+        activeTournaments: (specificData as any).active_tournaments
+        // --- FIM DA CORREÇÃO ---
+      }
+
+      return combinedUser;
+
+    } catch (error) {
+      console.error('Error in getCurrentUser:', error)
+      return null
+    }
+  }
 
   static async updateUser(userData: Partial<SupabaseUser>): Promise<{ success: boolean; error: string | null }> {
     try {

@@ -1,5 +1,6 @@
 import { UserType } from './types'
 
+
 export interface StoredUser {
   id: string
   email: string

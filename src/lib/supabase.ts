@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 
+
 const supabaseUrl = 'https://rdvmuripwkimkkpyjomc.supabase.co'
 const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJkdm11cmlwd2tpbWtrcHlqb21jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTc0MjQ0MTcsImV4cCI6MjA3MzAwMDQxN30.CPVengYKarY7VfYi0trtZ-ko1gHzxiMG8QVfGdJfdLs'
 
